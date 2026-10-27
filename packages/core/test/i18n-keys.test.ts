@@ -21,6 +21,11 @@ test('cache URL is https://<prefix>/<encoded i18n:<locale>:<namespace>>', () => 
   assert.equal(buildTranslationCacheUrl('de', 'common'), 'https://edgekits.dev/i18n%3Ade%3Acommon')
 })
 
+test('a dotted namespace keeps both formats: the dot is just a character', () => {
+  assert.equal(buildTranslationKvKey('en', 'app.billing'), 'edgekits.dev:app.billing:en')
+  assert.equal(buildTranslationCacheUrl('en', 'app.billing'), 'https://edgekits.dev/i18n%3Aen%3Aapp.billing')
+})
+
 test('cache Request carries the same URL', () => {
   assert.equal(buildTranslationCacheRequest('ja', 'blog').url, 'https://edgekits.dev/i18n%3Aja%3Ablog')
 })

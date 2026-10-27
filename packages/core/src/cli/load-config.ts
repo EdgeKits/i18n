@@ -1,5 +1,4 @@
 import fs from 'node:fs'
-import path from 'node:path'
 
 import { createJiti } from 'jiti'
 
@@ -8,14 +7,12 @@ import { defineI18nConfig, type I18nConfig } from '../types.ts'
 export const CONFIG_FILE = 'edgekits-i18n.config.ts'
 
 /**
- * Load the project's `edgekits-i18n.config.ts` from `root` — the same file its
- * `astro.config` passes to the integration — and validate it.
+ * Load the project's `edgekits-i18n.config.ts` from `configPath` (absolute) — the same
+ * file its `astro.config` passes to the integration — and validate it.
  */
-export async function loadI18nConfig(root: string): Promise<I18nConfig> {
-  const configPath = path.join(root, CONFIG_FILE)
-
+export async function loadI18nConfig(configPath: string): Promise<I18nConfig> {
   if (!fs.existsSync(configPath)) {
-    console.error(`[i18n] ${CONFIG_FILE} not found in ${root}`)
+    console.error(`[i18n] Config file not found: ${configPath}`)
     process.exit(1)
   }
 

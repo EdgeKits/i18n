@@ -1,4 +1,5 @@
 import { assembleNamespace } from './assemble.ts'
+import { fallbackIdentifier } from './key-format.ts'
 import type { Namespace, PickSchema } from './types.ts'
 
 /** The KV namespace the translations live in: the batched JSON read is all the fetcher uses. */
@@ -261,7 +262,7 @@ export function createFetchTranslations<L extends string>({
    * Look up the compiled FALLBACK_* dictionary for a namespace, if one was generated.
    */
   function getFallback(ns: Namespace): unknown {
-    return FALLBACKS[`FALLBACK_${String(ns).toUpperCase()}`]
+    return FALLBACKS[fallbackIdentifier(String(ns))]
   }
 
   /**

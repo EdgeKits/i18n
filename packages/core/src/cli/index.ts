@@ -21,9 +21,9 @@ import { purgeTranslationsCache } from './purge.ts'
 import { getKvNamespaceId, getWranglerVar, KV_BINDING, resolveWranglerBin } from './wrangler.ts'
 import { checkKeyPrefixZone } from './zone.ts'
 
-const HELP = `Usage: edgekits-i18n <command> [--fallbacks]
+const HELP = `Usage: edgekits-i18n <command> [--fallbacks] [--config <path>] [--wrangler <path>]
 
-Reads ${CONFIG_FILE} and <localesDir>/<locale>/<namespace>.json from the current directory.
+Reads ${CONFIG_FILE} and <localesDir>/<locale>/<namespace>.json from the config's directory.
 
 Commands:
   bundle    Write i18n-data.json, src/i18n.generated.d.ts and <generatedDir>/runtime-constants.ts.
@@ -33,28 +33,50 @@ Commands:
   migrate   bundle + fallbacks, then push to production KV, purge the changed edge-cache
             entries, and write .i18n-hashes.json. Refuses to run while .i18n-hashes.json
             has uncommitted changes.
+
+Options:
+  --config <path>    The ${CONFIG_FILE} to load (default: ./${CONFIG_FILE}). Its directory is the
+                     project root: locales, generated files and .i18n-hashes.json live there.
+  --wrangler <path>  The Worker's wrangler config (default: ./wrangler.jsonc): the TRANSLATIONS id and
+                     CLOUDFLARE_ZONE_ID; .dev.vars and the wrangler binary come from its directory.
+
+Monorepo: keep the config, locales and generated files in one package and pass any one app's
+Worker config (every app binds the same KV namespace and zone), from the repository root:
+  edgekits-i18n migrate --config packages/i18n/${CONFIG_FILE} --wrangler apps/app/wrangler.jsonc
 `
 
 const COMMANDS = ['bundle', 'seed', 'migrate'] as const
 type Command = (typeof COMMANDS)[number]
 
-const ROOT = process.cwd()
+// The flags that take a path; each is removed from argv, with its value, before the
+// command is looked for.
+const PATH_FLAGS = ['--config', '--wrangler'] as const
+type PathFlag = (typeof PATH_FLAGS)[number]
 
-// Fixed outputs at the project root.
-const OUTPUT_DATA = path.join(ROOT, 'i18n-data.json')
-const OUTPUT_TYPES = path.join(ROOT, 'src', 'i18n.generated.d.ts')
+const WRANGLER_FILE = 'wrangler.jsonc'
 
-// Stores per-namespace content hashes from the last production migrate.
-// Used to detect which namespaces actually changed and need cache purging.
-// TRACKED in git: the committed copy is the production purge baseline.
-// Absence means "first run", all namespaces treated as changed.
-const HASHES_FILE = path.join(ROOT, '.i18n-hashes.json')
+/**
+ * Every path the CLI touches, absolute. Two roots: the config's directory is the project
+ * root (translations in, generated files and the purge baseline out); the wrangler config's
+ * directory is the Worker root (`.dev.vars`, the wrangler binary, wrangler's own cwd). With
+ * no flags both are the current directory.
+ */
+type Paths = {
+  root: string
+  config: string
+  wranglerConfig: string
+  wranglerRoot: string
+  data: string
+  types: string
+  hashes: string
+}
 
 const KV_NAMESPACE_ID = /^[0-9a-f]{32}$/i
 
 await main(process.argv.slice(2))
 
-async function main(args: string[]): Promise<void> {
+async function main(argv: string[]): Promise<void> {
+  const { args, flags } = extractPathFlags(argv)
   const command = args.find((arg) => !arg.startsWith('-'))
 
   if (!command || args.includes('--help') || args.includes('-h')) {
@@ -68,43 +90,103 @@ async function main(args: string[]): Promise<void> {
     process.exit(1)
   }
 
-  await run(command as Command, args)
+  await run(command as Command, args, resolvePaths(flags))
 }
 
-async function run(command: Command, args: string[]): Promise<void> {
+/** Takes `--config <path>` / `--wrangler <path>` (or `--flag=<path>`) out of argv. */
+function extractPathFlags(argv: string[]): { args: string[]; flags: Partial<Record<PathFlag, string>> } {
+  const args: string[] = []
+  const flags: Partial<Record<PathFlag, string>> = {}
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!
+    const flag = PATH_FLAGS.find((f) => arg === f || arg.startsWith(`${f}=`))
+    if (!flag) {
+      args.push(arg)
+      continue
+    }
+    const value = arg === flag ? argv[++i] : arg.slice(flag.length + 1)
+    if (!value || value.startsWith('-')) {
+      console.error(`[i18n] ${flag} needs a path.`)
+      process.exit(1)
+    }
+    flags[flag] = value
+  }
+
+  return { args, flags }
+}
+
+function resolvePaths(flags: Partial<Record<PathFlag, string>>): Paths {
+  const config = path.resolve(flags['--config'] ?? CONFIG_FILE)
+  if (!fs.existsSync(config)) {
+    console.error(`[i18n] Config file not found: ${config}`)
+    process.exit(1)
+  }
+
+  // The default wrangler config is read only by seed and migrate (bundle never needs it);
+  // a path given explicitly must exist whatever the command.
+  const wranglerConfig = path.resolve(flags['--wrangler'] ?? WRANGLER_FILE)
+  if (flags['--wrangler'] !== undefined && !fs.existsSync(wranglerConfig)) {
+    console.error(`[i18n] Wrangler config not found: ${wranglerConfig}`)
+    process.exit(1)
+  }
+
+  const root = path.dirname(config)
+  return {
+    root,
+    config,
+    wranglerConfig,
+    wranglerRoot: path.dirname(wranglerConfig),
+    // Fixed outputs at the project root.
+    data: path.join(root, 'i18n-data.json'),
+    types: path.join(root, 'src', 'i18n.generated.d.ts'),
+    // Stores per-namespace content hashes from the last production migrate.
+    // Used to detect which namespaces actually changed and need cache purging.
+    // TRACKED in git: the committed copy is the production purge baseline.
+    // Absence means "first run", all namespaces treated as changed.
+    hashes: path.join(root, '.i18n-hashes.json'),
+  }
+}
+
+// A path as the user sees it: relative to where the CLI was run, forward slashes.
+function shown(file: string): string {
+  return path.relative(process.cwd(), file).split(path.sep).join('/')
+}
+
+async function run(command: Command, args: string[], paths: Paths): Promise<void> {
   const shouldDeploy = command !== 'bundle'
   const isLocal = command === 'seed'
   const shouldGenerateFallbacks =
     shouldDeploy || args.includes('--fallbacks') || process.env.I18N_GENERATE_FALLBACKS === 'true'
 
   if (command === 'migrate') {
-    assertCleanPurgeBaseline()
+    assertCleanPurgeBaseline(paths)
   }
 
-  const config = await loadI18nConfig(ROOT)
+  const config = await loadI18nConfig(paths.config)
   const defaultLocale = config.defaultLocale
-  const localesDir = path.join(ROOT, config.localesDir ?? DEFAULT_LOCALES_DIR)
-  const generatedDir = path.join(ROOT, config.generatedDir ?? DEFAULT_GENERATED_DIR)
+  const localesDir = path.join(paths.root, config.localesDir ?? DEFAULT_LOCALES_DIR)
+  const generatedDir = path.join(paths.root, config.generatedDir ?? DEFAULT_GENERATED_DIR)
   const outputRuntimeConstants = path.join(generatedDir, 'runtime-constants.ts')
   const outputFallbacks = path.join(generatedDir, 'fallbacks.generated.ts')
 
   // Read before writing anything, so a missing binding fails the run up front.
-  const kvId = shouldDeploy ? getKvNamespaceId(ROOT, KV_BINDING) : undefined
+  const kvId = shouldDeploy ? getKvNamespaceId(paths.wranglerConfig, KV_BINDING) : undefined
 
   // The id becomes a command-line argument (deploy()); only a real namespace id's shape
   // may get there.
   if (kvId !== undefined && !KV_NAMESPACE_ID.test(kvId)) {
     console.error(
-      `[i18n] The ${KV_BINDING} id in wrangler.jsonc, "${kvId}", is not a KV namespace id (32 hex characters).`,
+      `[i18n] The ${KV_BINDING} id in ${shown(paths.wranglerConfig)}, "${kvId}", is not a KV namespace id (32 hex characters).`,
     )
     process.exit(1)
   }
 
-  // The project's wrangler, found before anything is written.
+  // The Worker's wrangler, found before anything is written.
   let wranglerBin: string | undefined
   if (shouldDeploy) {
     try {
-      wranglerBin = resolveWranglerBin(ROOT)
+      wranglerBin = resolveWranglerBin(paths.wranglerRoot)
     } catch (err) {
       console.error(`[i18n] ${err instanceof Error ? err.message : String(err)}`)
       process.exit(1)
@@ -139,8 +221,8 @@ async function run(command: Command, args: string[]): Promise<void> {
   // -------------------------------------------------------------------------
 
   // Load previous hashes (absent on first run — all namespaces treated as new)
-  const previousHashes: HashMap = fs.existsSync(HASHES_FILE)
-    ? (JSON.parse(fs.readFileSync(HASHES_FILE, 'utf8')) as HashMap)
+  const previousHashes: HashMap = fs.existsSync(paths.hashes)
+    ? (JSON.parse(fs.readFileSync(paths.hashes, 'utf8')) as HashMap)
     : {}
 
   const { currentHashes, changedKeys } = diffHashes(collected, previousHashes)
@@ -156,7 +238,7 @@ async function run(command: Command, args: string[]): Promise<void> {
   // 3. Write KV bulk data, types and runtime constants
   // -------------------------------------------------------------------------
 
-  fs.writeFileSync(OUTPUT_DATA, JSON.stringify(buildBulkData(collected, config.keyPrefix), null, 2) + '\n', 'utf8')
+  fs.writeFileSync(paths.data, JSON.stringify(buildBulkData(collected, config.keyPrefix), null, 2) + '\n', 'utf8')
 
   const source = schemaSourceLocale(collected, defaultLocale)
   if (source && source !== defaultLocale) {
@@ -166,7 +248,7 @@ async function run(command: Command, args: string[]): Promise<void> {
     )
   }
 
-  writeFile(OUTPUT_TYPES, typesContent)
+  writeFile(paths.types, typesContent)
   writeFile(outputRuntimeConstants, buildRuntimeConstantsContent(collected, defaultLocale))
 
   // -------------------------------------------------------------------------
@@ -190,11 +272,11 @@ async function run(command: Command, args: string[]): Promise<void> {
     console.log('[i18n] Skipping fallback generation. Enable with I18N_GENERATE_FALLBACKS=true or --fallbacks.')
   }
 
-  const outputs = [OUTPUT_DATA, OUTPUT_TYPES, outputRuntimeConstants, wroteFallbacks ? outputFallbacks : null].filter(
+  const outputs = [paths.data, paths.types, outputRuntimeConstants, wroteFallbacks ? outputFallbacks : null].filter(
     Boolean,
   ) as string[]
 
-  console.log('Generated:\n' + outputs.map((p) => `- ${path.relative(ROOT, p).split(path.sep).join('/')}`).join('\n'))
+  console.log('Generated:\n' + outputs.map((p) => `- ${shown(p)}`).join('\n'))
 
   // -------------------------------------------------------------------------
   // 5. Push to KV + purge changed cache entries via Cloudflare API
@@ -208,7 +290,7 @@ async function run(command: Command, args: string[]): Promise<void> {
     return
   }
 
-  await deploy({ config, kvId: kvId!, wranglerBin: wranglerBin!, isLocal, changedKeys, currentHashes })
+  await deploy({ config, paths, kvId: kvId!, wranglerBin: wranglerBin!, isLocal, changedKeys, currentHashes })
 }
 
 function collectTranslations(localesDir: string): CollectedData {
@@ -255,6 +337,7 @@ function writeFile(file: string, content: string): void {
 
 async function deploy({
   config,
+  paths,
   kvId,
   wranglerBin,
   isLocal,
@@ -262,6 +345,7 @@ async function deploy({
   currentHashes,
 }: {
   config: I18nConfig
+  paths: Paths
   kvId: string
   wranglerBin: string
   isLocal: boolean
@@ -275,12 +359,27 @@ async function deploy({
   console.log(`[i18n] Pushing translations to ${target} KV...`)
   try {
     // wrangler's JavaScript entry, run by this Node binary: no shell on any platform
-    // (no `.cmd` shim on Windows), and the arguments are constants plus the shape-checked id.
+    // (no `.cmd` shim on Windows), and the arguments are constants, the shape-checked id
+    // and absolute paths.
+    // Always an explicit --config, from the Worker root: wrangler resolves `.wrangler/state`
+    // (where a local seed lands, and where `wrangler dev` there reads) from the directory
+    // of the config it loaded, and without --config a stray wrangler.json there would win
+    // over the wrangler.jsonc this CLI read.
     execFileSync(
       process.execPath,
-      [wranglerBin, 'kv', 'bulk', 'put', 'i18n-data.json', kvFlag, `--namespace-id=${kvId}`],
+      [
+        wranglerBin,
+        'kv',
+        'bulk',
+        'put',
+        paths.data,
+        kvFlag,
+        `--namespace-id=${kvId}`,
+        '--config',
+        paths.wranglerConfig,
+      ],
       {
-        cwd: ROOT,
+        cwd: paths.wranglerRoot,
         stdio: 'inherit',
       },
     )
@@ -330,15 +429,15 @@ async function deploy({
     shouldWriteHashes = true
   } else {
     // Changes — the purge must succeed before we update hashes.
-    loadDevVars()
+    loadDevVars(paths.wranglerRoot)
 
     const purgeUrls = purgeUrlsFor(changedKeys, config.keyPrefix)
-    const zoneId = getWranglerVar(ROOT, 'CLOUDFLARE_ZONE_ID') || process.env.CLOUDFLARE_ZONE_ID
+    const zoneId = getWranglerVar(paths.wranglerConfig, 'CLOUDFLARE_ZONE_ID') || process.env.CLOUDFLARE_ZONE_ID
     const apiToken = process.env.CLOUDFLARE_CACHEPURGE_API_TOKEN
 
     if (!zoneId) {
       console.warn(
-        '[i18n] ⚠️  CLOUDFLARE_ZONE_ID not found in wrangler.jsonc vars or environment. ' +
+        `[i18n] ⚠️  CLOUDFLARE_ZONE_ID not found in ${shown(paths.wranglerConfig)} vars or environment. ` +
           'Skipping cache purge — hash file NOT updated. Re-run `edgekits-i18n migrate` after setting the variable.',
       )
     } else if (!apiToken) {
@@ -369,18 +468,18 @@ async function deploy({
   }
 
   if (shouldWriteHashes) {
-    fs.writeFileSync(HASHES_FILE, JSON.stringify(currentHashes, null, 2) + '\n', 'utf8')
-    console.log('[i18n] ✅ .i18n-hashes.json updated.')
+    fs.writeFileSync(paths.hashes, JSON.stringify(currentHashes, null, 2) + '\n', 'utf8')
+    console.log(`[i18n] ✅ ${shown(paths.hashes)} updated.`)
   }
 }
 
 /**
- * Load .dev.vars into process.env. wrangler dev reads .dev.vars for the Worker
- * runtime, but Node does not — so it is parsed here. Never overwrites a variable
- * already set in the real environment.
+ * Load the Worker root's .dev.vars into process.env. wrangler dev reads .dev.vars for
+ * the Worker runtime, but Node does not — so it is parsed here. Never overwrites a
+ * variable already set in the real environment.
  */
-function loadDevVars(): void {
-  const devVarsPath = path.join(ROOT, '.dev.vars')
+function loadDevVars(wranglerRoot: string): void {
+  const devVarsPath = path.join(wranglerRoot, '.dev.vars')
   if (!fs.existsSync(devVarsPath)) return
 
   const lines = fs.readFileSync(devVarsPath, 'utf8').split('\n')
@@ -427,21 +526,24 @@ function loadDevVars(): void {
  * guard on the deploy path must not be the reason the CLI cannot run in CI
  * or from a tarball.
  */
-function assertCleanPurgeBaseline(): void {
-  const relativePath = path.relative(ROOT, HASHES_FILE).split(path.sep).join('/')
+function assertCleanPurgeBaseline(paths: Paths): void {
+  // git runs from the project root on the bare file name; messages show the path from
+  // where the CLI was run.
+  const relativePath = path.relative(paths.root, paths.hashes).split(path.sep).join('/')
+  const shownPath = shown(paths.hashes)
   let status: string
 
   try {
     // Porcelain v1 is a stable format, and `--` scopes it to the one path, so a
     // dirty working tree elsewhere (the usual state) is not this guard's business.
     status = execFileSync('git', ['status', '--porcelain', '--', relativePath], {
-      cwd: ROOT,
+      cwd: paths.root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   } catch (err) {
     console.warn(
-      `[i18n] ⚠️  Could not check ${relativePath} against git (${err instanceof Error ? err.message.split('\n')[0] : String(err)}).\n` +
+      `[i18n] ⚠️  Could not check ${shownPath} against git (${err instanceof Error ? err.message.split('\n')[0] : String(err)}).\n` +
         '        Proceeding WITHOUT the purge-baseline check. If that file carries hashes\n' +
         '        that do not describe production, this run will skip the cache purge and say nothing.',
     )
@@ -451,7 +553,7 @@ function assertCleanPurgeBaseline(): void {
   if (status.trim() === '') return
 
   console.error(
-    `\n[i18n] ❌ ${relativePath} has uncommitted changes. Refusing to migrate.\n` +
+    `\n[i18n] ❌ ${shownPath} has uncommitted changes. Refusing to migrate.\n` +
       `\n  git status --porcelain: ${status.trim()}\n` +
       '\n  That file is the purge baseline: the record of what production KV already holds.\n' +
       '  Migrating against a modified copy makes the change diff come out wrong. Every value\n' +
@@ -461,10 +563,10 @@ function assertCleanPurgeBaseline(): void {
       '\n  Two things dirty this file, and they need opposite fixes:\n' +
       '\n    1. Something other than migrate wrote it (a hand edit, or a pre-package local\n' +
       '       seed script). Those hashes lie about production. Discard them, then migrate:\n' +
-      '           git checkout .i18n-hashes.json && npx edgekits-i18n migrate\n' +
+      `           git checkout ${shownPath} && npx edgekits-i18n migrate\n` +
       '\n    2. A previous `edgekits-i18n migrate` wrote it. Those hashes describe production\n' +
       '       and are correct. Commit them; migrating again is unnecessary:\n' +
-      '           git add .i18n-hashes.json && git commit\n' +
+      `           git add ${shownPath} && git commit\n` +
       '\n  The CLI cannot tell the two apart — the file looks identical either way. If you\n' +
       '  are unsure, the last i18n command you ran is the answer.\n',
   )

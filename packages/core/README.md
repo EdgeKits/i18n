@@ -53,12 +53,21 @@ lang-cookie helpers over any `CookieJar`, and the KV key and cache URL builders 
 
 ## CLI
 
-The `edgekits-i18n` command is this package's. It reads `edgekits-i18n.config.ts` from the
-directory it runs in.
+The `edgekits-i18n` command is this package's. It reads `edgekits-i18n.config.ts` and
+`wrangler.jsonc` from the directory it runs in, unless two flags name them:
 
 ```sh
 npx edgekits-i18n seed
 ```
+
+| Flag                | Default                     | What comes from it                                                                                                                                              |
+| ------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--config <path>`   | `./edgekits-i18n.config.ts` | The config. Its directory is the project root: `localesDir`, `generatedDir`, `i18n-data.json`, `src/i18n.generated.d.ts` and `.i18n-hashes.json` resolve there. |
+| `--wrangler <path>` | `./wrangler.jsonc`          | The `TRANSLATIONS` KV id and the `CLOUDFLARE_ZONE_ID` var. Its directory is the Worker root: `.dev.vars` and the project's wrangler are found there.            |
+
+Both paths resolve against the current directory, and a flag may come before or after the
+command. The CLI always runs wrangler with `--config` set to that file, from its directory, so
+local KV state lands in the `.wrangler/state/` that `wrangler dev` there reads.
 
 | Command                            | Writes                                                                                                              | Then                                                                                                   |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -69,6 +78,11 @@ npx edgekits-i18n seed
 
 The generated files are ordinary project files: commit them, and run the CLI again after you
 edit a JSON file.
+
+A namespace is the file name under `<localesDir>/<locale>/`: segments of lowercase letters,
+digits and underscores, joined by single dots, so `locales/en/app.billing.json` is the
+namespace `app.billing`. Its compiled fallback is `FALLBACK_APP__BILLING` (dots become `__`),
+so `app.billing` and `app__billing` cannot both exist; the KV key and cache URL keep the dot.
 
 `.i18n-hashes.json` holds one content hash per namespace and locale as of the last successful
 `migrate`; the next `migrate` purges exactly the entries whose hash changed. Rules:
@@ -84,6 +98,31 @@ edit a JSON file.
 environment) and the token from `CLOUDFLARE_CACHEPURGE_API_TOKEN` (the environment or
 `.dev.vars`). Without either, it still pushes to KV but skips the purge and leaves
 `.i18n-hashes.json` alone, so the next run retries.
+
+### Monorepo: one translations folder, several Workers
+
+```text
+packages/i18n/        edgekits-i18n.config.ts, locales/, the generated files, .i18n-hashes.json
+apps/app/             wrangler.jsonc (+ .dev.vars)
+apps/admin/           wrangler.jsonc (+ .dev.vars)
+```
+
+- `packages/i18n/` holds the config, `locales/` and the generated files; each app imports them
+  from there.
+- Every app's `wrangler.jsonc` binds the same `TRANSLATIONS` namespace and sets the same
+  `CLOUDFLARE_ZONE_ID`.
+- Run one `migrate` per change, from the repository root, with any one app's wrangler config:
+
+  ```sh
+  npx edgekits-i18n migrate --config packages/i18n/edgekits-i18n.config.ts --wrangler apps/app/wrangler.jsonc
+  ```
+
+  It pushes once to the shared namespace and purges once: the cache URLs live on the zone, so
+  the purge reaches every host on it.
+
+- `.i18n-hashes.json` lives next to the config; commit it there.
+- `seed` takes the same flags. Local KV state belongs to the app whose wrangler config you pass,
+  so seed once per app you run `wrangler dev` in.
 
 ## License
 

@@ -105,6 +105,20 @@ test('partial miss: one batched KV get for the missing namespaces, one put each 
   }
 })
 
+test('a dotted namespace finds its compiled fallback under FALLBACK_APP__BILLING', async () => {
+  const fallbacks = { FALLBACK_APP__BILLING: { plan: 'Pro', added: 'New key' } }
+
+  const down = setup({ kvThrows: true, fallbacks })
+  assert.deepEqual(await down.i18n.fetchTranslations('de', ['app.billing']), {
+    'app.billing': { plan: 'Pro', added: 'New key' },
+  })
+
+  const miss = setup({ kv: { [kvKey('app.billing')]: { plan: 'Profi' } }, fallbacks })
+  assert.deepEqual(await miss.i18n.fetchTranslations('de', ['app.billing']), {
+    'app.billing': { plan: 'Profi', added: 'New key' },
+  })
+})
+
 test('cacheEnabled false: KV only, the cache is never touched', async () => {
   const { i18n, kvCalls, cacheCalls, scheduled } = setup({
     cacheEnabled: false,

@@ -42,7 +42,7 @@ export {
 } from './locale-fallback.ts'
 export { MARKDOWN_PATH, markdownRedirectTarget, type MarkdownOptions } from './markdown-path.ts'
 export { assembleNamespace } from './assemble.ts'
-export { formatTranslationCacheUrl, formatTranslationKvKey } from './key-format.ts'
+export { fallbackIdentifier, formatTranslationCacheUrl, formatTranslationKvKey } from './key-format.ts'
 export { parseBooleanFlag } from './parse-boolean.ts'
 export {
   getCookieLang,
