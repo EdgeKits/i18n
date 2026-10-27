@@ -1,5 +1,5 @@
 {
-  "name": "edgekits-i18n",
+  "name": "@edgekits/i18n-monorepo",
   "private": true,
   "type": "module",
   "engines": {
