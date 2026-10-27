@@ -1,7 +1,7 @@
 # Astro i18n (EdgeKits)
 
 A free agent skill for Claude Code, Cursor, OpenCode and any other coding agent that reads `SKILL.md`. Tell your
-agent to make your Astro site multilingual, and it adopts [`@edgekits/astro-i18n`](https://github.com/EdgeKits/astro-i18n):
+agent to make your Astro site multilingual, and it adopts [`@edgekits/astro-i18n`](https://github.com/EdgeKits/i18n):
 translations stored as data in Workers KV, a per-namespace edge cache that is purged only where content changed,
 and translation keys typed from your default locale's JSON. It asks the few questions only you can answer
 (locales, default locale, geo and markdown policy, flags), follows the package README in order, and checks the result.
@@ -13,7 +13,7 @@ no client framework and no zod in the browser), and multilingual SEO (`<html lan
 The plugin ships two skills. `astro-i18n`, described below, triggers on an Astro site on Cloudflare Workers: "add
 i18n", "make the site multilingual", a new locale, namespace, form or hreflang tags. `tanstack-i18n` triggers in a
 TanStack Start app on Workers with a custom Hono `src/worker.ts`: "add i18n to the app", "add a namespace",
-"translate the admin", `useT`. It adopts [`@edgekits/tanstack-i18n`](https://github.com/EdgeKits/astro-i18n/tree/main/packages/tanstack#readme),
+"translate the admin", `useT`. It adopts [`@edgekits/tanstack-i18n`](https://github.com/EdgeKits/i18n/tree/main/packages/tanstack#readme),
 which shares the translations folder and the KV namespace with the monorepo's other Workers.
 
 <!-- skill-guide:start -->
@@ -23,7 +23,7 @@ which shares the translations folder and the KV namespace with the monorepo's ot
 `astro-i18n` is a free agent skill that sets up `@edgekits/astro-i18n` in your project and keeps
 working with it afterwards. It runs in Claude Code as a plugin, and in Cursor, OpenCode or any other
 coding agent that reads `SKILL.md`. Its source is in
-[`plugins/astro-i18n`](https://github.com/EdgeKits/astro-i18n/tree/main/plugins/astro-i18n).
+[`plugins/astro-i18n`](https://github.com/EdgeKits/i18n/tree/main/plugins/astro-i18n).
 
 ### What it does
 
@@ -95,7 +95,7 @@ folder. In both cases the plugin itself is still installed once per contributor 
 Any other agent, with the [skills CLI](https://skills.sh):
 
 ```sh
-npx skills add EdgeKits/astro-i18n --skill astro-i18n
+npx skills add EdgeKits/i18n --skill astro-i18n
 ```
 
 ### Prerequisites

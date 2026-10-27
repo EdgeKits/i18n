@@ -7,7 +7,7 @@ default locale's JSON files define a typed schema. After a KV error the compiled
 served and not cached, so the next request reads KV again. This package holds the config validation,
 the fetcher, locale resolution, the lang cookie, the format helpers and the `edgekits-i18n`
 CLI. A framework adapter builds on it: for Astro, use
-[`@edgekits/astro-i18n`](https://github.com/EdgeKits/astro-i18n/tree/main/packages/astro#readme),
+[`@edgekits/astro-i18n`](https://github.com/EdgeKits/i18n/tree/main/packages/astro#readme),
 which depends on this package and needs nothing else from you.
 
 ## `createI18n`

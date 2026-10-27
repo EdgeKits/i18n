@@ -14,12 +14,12 @@
   "author": "Gary Stupak",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EdgeKits/astro-i18n.git",
+    "url": "git+https://github.com/EdgeKits/i18n.git",
     "directory": "packages/core"
   },
-  "homepage": "https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#readme",
+  "homepage": "https://github.com/EdgeKits/i18n/tree/main/packages/core#readme",
   "bugs": {
-    "url": "https://github.com/EdgeKits/astro-i18n/issues"
+    "url": "https://github.com/EdgeKits/i18n/issues"
   },
   "engines": {
     "node": ">=22"
@@ -33,6 +33,7 @@
       "types": "./dist/format.d.ts",
       "default": "./dist/format.js"
     },
+    "./cli": "./dist/cli/index.js",
     "./package.json": "./package.json"
   },
   "bin": {

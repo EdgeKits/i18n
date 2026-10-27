@@ -10,8 +10,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @edgekits/i18n-core && npm run build -w @edgekits/astro-i18n -w @edgekits/tanstack-i18n",
-    "test": "npm run build -w @edgekits/i18n-core && npm test --workspaces",
-    "typecheck": "npm run build -w @edgekits/i18n-core && npm run typecheck --workspaces",
+    "test": "npm run build -w @edgekits/i18n-core && npm test --workspaces --if-present",
+    "typecheck": "npm run build -w @edgekits/i18n-core && npm run typecheck --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

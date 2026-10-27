@@ -8,7 +8,7 @@ All notable changes to this package are documented here. The format follows
 
 ### Changed
 
-- The package is an adapter over [`@edgekits/i18n-core`](https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#readme), the framework-free engine extracted from it. Same entries, same exports, same generated files. The `edgekits-i18n` command now ships with the core and reaches your project's `.bin` through this package's dependency; `jiti` and `jsonc-parser` are no longer direct dependencies of this package. Config validation errors are prefixed `[@edgekits/i18n-core]`.
+- The package is an adapter over [`@edgekits/i18n-core`](https://github.com/EdgeKits/i18n/tree/main/packages/core#readme), the framework-free engine extracted from it. Same entries, same exports, same generated files. The `edgekits-i18n` command now ships with the core and reaches your project's `.bin` through this package's dependency; `jiti` and `jsonc-parser` are no longer direct dependencies of this package. Config validation errors are prefixed `[@edgekits/i18n-core]`.
 - The switcher's client script builds its target URL through the routing mode, so the one script Astro inlines per page changes.
 - A project's own Astro `i18n` block must keep `prefixDefaultLocale: true`, in both routing modes (the build stops otherwise): Astro checks the URL after the middleware, on the rewritten `/<defaultLocale>/…` path, and with `false` it would answer 404 there.
 

@@ -7,9 +7,9 @@
     "name": "EdgeKits",
     "url": "https://edgekits.dev"
   },
-  "homepage": "https://github.com/EdgeKits/astro-i18n",
-  "repository": "https://github.com/EdgeKits/astro-i18n",
-  "privacyPolicyUrl": "https://github.com/EdgeKits/astro-i18n/tree/main/plugins/astro-i18n#privacy",
+  "homepage": "https://github.com/EdgeKits/i18n",
+  "repository": "https://github.com/EdgeKits/i18n",
+  "privacyPolicyUrl": "https://github.com/EdgeKits/i18n/tree/main/plugins/astro-i18n#privacy",
   "license": "MIT",
   "keywords": ["astro", "i18n", "cloudflare-workers", "kv", "translations", "localization"]
 }

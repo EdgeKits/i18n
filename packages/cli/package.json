@@ -1,0 +1,41 @@
+{
+  "name": "edgekits-i18n",
+  "version": "0.2.0",
+  "description": "The edgekits-i18n command of the EdgeKits i18n engine: installs @edgekits/i18n-core and runs its CLI.",
+  "keywords": [
+    "i18n",
+    "cloudflare",
+    "cloudflare-workers",
+    "kv",
+    "edge"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "author": "Gary Stupak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EdgeKits/i18n.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/EdgeKits/i18n/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/EdgeKits/i18n/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "edgekits-i18n": "bin.js"
+  },
+  "files": [
+    "bin.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@edgekits/i18n-core": "0.2.0"
+  }
+}

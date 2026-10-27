@@ -1,7 +1,7 @@
 # @edgekits/tanstack-i18n
 
 Edge-native i18n for TanStack Start on Cloudflare Workers, over the EdgeKits engine
-[`@edgekits/i18n-core`](https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#readme):
+[`@edgekits/i18n-core`](https://github.com/EdgeKits/i18n/tree/main/packages/core#readme):
 translations in Workers KV, a per-namespace edge cache, typed keys. For an app whose Worker
 entry is a Hono app that hands the request to TanStack Start, and whose URLs carry no locale.
 
@@ -22,7 +22,7 @@ npm install @edgekits/tanstack-i18n @edgekits/i18n-core
 ```
 
 Peers: `hono` 4 and `react` 19. Write `edgekits-i18n.config.ts` and `locales/<locale>/<namespace>.json`
-as the [core README](https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#readme)
+as the [core README](https://github.com/EdgeKits/i18n/tree/main/packages/core#readme)
 describes, bind the `TRANSLATIONS` KV namespace in `wrangler.jsonc`, then generate and seed:
 
 ```sh
@@ -243,7 +243,7 @@ npx edgekits-i18n migrate --config packages/i18n/edgekits-i18n.config.ts --wrang
 ```
 
 See the core README's
-[monorepo section](https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#monorepo-one-translations-folder-several-workers).
+[monorepo section](https://github.com/EdgeKits/i18n/tree/main/packages/core#monorepo-one-translations-folder-several-workers).
 
 ## License
 
