@@ -72,6 +72,8 @@ export type I18nMiddlewareDeps = {
 // dev and production alike: see negotiatedRedirect(). A browser keeps a 301 and never asks
 // the server again, so a language chosen later in the switcher would be bypassed on the
 // next visit to `/`, and the URL-wins cookie sync below would then overwrite that choice.
+//
+// Both kinds, in both routing modes, keep the query string (`?utm=…`, `?sent=1`).
 const REDIRECT_STATUS = import.meta.env?.DEV ? 302 : 301
 
 // A redirect whose target depends on the visitor: temporary, never stored by a shared
@@ -123,9 +125,6 @@ function buildLocalizedPath(locale: Locale, rest: string[]): string {
 export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandler {
   const isLocale = (segment: string) => deps.parseLocale(segment) !== null
   const pathOptions = { routing: deps.routing, defaultLocale: deps.defaultLocale, isLocale }
-  // 'prefix-except-default' keeps the query string through every rewrite and redirect
-  // (`?sent=1`, a form's `?_action=…`); 'prefix' redirects without it, as it always has.
-  const searchOf = (url: URL) => (deps.routing === 'prefix' ? '' : url.search)
 
   // Resolves the most appropriate locale for the user based on a fallback cascade
   // (the core's locale-fallback.ts, where the order is documented and tested):
@@ -200,7 +199,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     // Normalize trailing slash and structure
     const normalized = buildLocalizedPath(urlLocale, segments.slice(1))
     if (pathname !== normalized) {
-      return context.redirect(normalized + searchOf(url), REDIRECT_STATUS)
+      return context.redirect(normalized + url.search, REDIRECT_STATUS)
     }
 
     return await next()
@@ -284,7 +283,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
       // (the core's markdown-path.ts). Without `markdownLocale` they pass through untouched.
       const target = markdownTarget(pathname)
       if (target) {
-        return context.redirect(target + searchOf(url), REDIRECT_STATUS)
+        return context.redirect(target + url.search, REDIRECT_STATUS)
       }
 
       // 'prefix-except-default': the default locale's `[lang]` routes answer at the root,
@@ -338,7 +337,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     if (!firstSegment) {
       const target = buildLocalizedPath(fallbackLocale, [])
       if (pathname !== target) {
-        return negotiatedRedirect(target)
+        return negotiatedRedirect(target + url.search)
       }
       return await next()
     }
@@ -354,7 +353,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     const target = buildLocalizedPath(fallbackLocale, segments)
 
     if (pathname !== target) {
-      return negotiatedRedirect(target)
+      return negotiatedRedirect(target + url.search)
     }
 
     return await next()

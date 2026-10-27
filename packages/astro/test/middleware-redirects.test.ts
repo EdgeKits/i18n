@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { i18nMiddleware } from '../src/middleware/i18n.ts'
+import type { MiddlewareHandler } from 'astro'
+import { readCookieLang, setCookieLang, type CookieJar } from '@edgekits/i18n-core'
+
+import { createI18nMiddleware, i18nMiddleware } from '../src/middleware/i18n.ts'
 
 /**
  * Audit 2026-10-12 A02-1: redirects whose target depends on the visitor (cookie,
@@ -18,6 +21,7 @@ type CookieSet = { name: string; value: string; options: Record<string, unknown>
 async function run(
   path: string,
   fake: Fake = {},
+  handler: MiddlewareHandler = i18nMiddleware,
 ): Promise<{ response: Response; nextCalled: boolean; cookieSets: CookieSet[] }> {
   let nextCalled = false
   const cookieSets: CookieSet[] = []
@@ -46,7 +50,7 @@ async function run(
     return new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } })
   }
 
-  const response = (await i18nMiddleware(context as never, next as never)) as Response
+  const response = (await handler(context as never, next as never)) as Response
   return { response, nextCalled, cookieSets }
 }
 
@@ -125,4 +129,51 @@ test('the lang cookie is not httpOnly', async () => {
   assert.equal(set?.options.httpOnly, false)
   assert.equal(set?.options.sameSite, 'lax')
   assert.equal(set?.options.path, '/')
+})
+
+// The fixture's middleware with `markdownLocale: 'en'`, the fixture has none.
+function withMarkdownLocale(): MiddlewareHandler {
+  const locales = ['en', 'de', 'es', 'ja']
+  const parseLocale = (value: unknown) => (typeof value === 'string' && locales.includes(value) ? value : null)
+  const cookie = { name: 'lang', parseLocale }
+  const jar = (cookies: any): CookieJar => ({
+    get: (name) => cookies.get(name)?.value,
+    set: (name, value, options) => cookies.set(name, value, options),
+  })
+  return createI18nMiddleware({
+    routing: 'prefix',
+    defaultLocale: 'en',
+    markdownLocale: 'en',
+    countryToLocale: undefined,
+    parseLocale,
+    resolveLocaleForTranslations: (locale) => locale,
+    readCookieLang: (cookies) => readCookieLang(jar(cookies), cookie),
+    setCookieLang: (cookies, locale) => setCookieLang(jar(cookies), locale, { ...cookie, maxAge: 60, secure: true }),
+  })
+}
+
+// The query string survives every redirect.
+test('query kept: no locale in the URL', async () => {
+  assertNegotiated((await run('/?utm=x')).response, '/en/?utm=x')
+})
+
+test('query kept: no locale in the URL, a lang cookie', async () => {
+  assertNegotiated((await run('/?utm=x', { cookie: 'de' })).response, '/de/?utm=x')
+})
+
+test('query kept: an invalid first segment', async () => {
+  assertNegotiated((await run('/about?x=1')).response, '/en/about/?x=1')
+})
+
+test('query kept: trailing-slash normalisation', async () => {
+  const { response } = await run('/de/blog?x=1')
+  assert.equal(response.status, 301)
+  assert.equal(response.headers.get('Location'), '/de/blog/?x=1')
+  assert.equal(response.headers.get('Vary'), null)
+})
+
+test('query kept: a .md path moved to markdownLocale', async () => {
+  const { response } = await run('/de/x.md?x=1', {}, withMarkdownLocale())
+  assert.equal(response.status, 301)
+  assert.equal(response.headers.get('Location'), '/en/x.md?x=1')
 })
