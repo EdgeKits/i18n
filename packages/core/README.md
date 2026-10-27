@@ -3,7 +3,8 @@
 The EdgeKits edge-native i18n engine, free of any framework. Translations live as data in
 Workers KV, one JSON value per locale and namespace; each namespace is cached at the edge under
 its own URL and purged through the Cloudflare Purge API only when its content changed; the
-default locale's JSON files define a typed schema. This package holds the config validation,
+default locale's JSON files define a typed schema. After a KV error the compiled fallback is
+served and not cached, so the next request reads KV again. This package holds the config validation,
 the fetcher, locale resolution, the lang cookie, the format helpers and the `edgekits-i18n`
 CLI. A framework adapter builds on it: for Astro, use
 [`@edgekits/astro-i18n`](https://github.com/EdgeKits/astro-i18n/tree/main/packages/astro#readme),

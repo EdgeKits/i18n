@@ -47,9 +47,12 @@ function setup(options: Setup = {}) {
       const body = cacheStore.get(request.url)
       return body === undefined ? undefined : new Response(body)
     },
+    // Stored as well as recorded, so a later call on the same instance sees what was written.
     async put(request, response) {
       cacheCalls.push(`put ${request.url}`)
-      puts.push({ url: request.url, body: await response.json(), headers: Object.fromEntries(response.headers) })
+      const body = await response.json()
+      cacheStore.set(request.url, JSON.stringify(body))
+      puts.push({ url: request.url, body, headers: Object.fromEntries(response.headers) })
     },
   }
 
@@ -63,7 +66,7 @@ function setup(options: Setup = {}) {
   }
 
   const i18n = createI18n(config, { fallbacks: options.fallbacks ?? {}, runtimeConstants: RUNTIME_CONSTANTS }, bindings)
-  return { i18n, kvCalls, cacheCalls, puts, scheduled }
+  return { i18n, kvCalls, cacheCalls, cacheStore, puts, scheduled }
 }
 
 test('full cache hit: every namespace from the cache, zero KV reads, nothing scheduled', async () => {
@@ -154,6 +157,28 @@ test('KV throwing: the compiled fallbacks only, {} for a namespace without one',
     common: { title: 'Hello' },
     blog: {},
   })
+})
+
+test('KV throwing: the fallbacks are served and never cached; a healthy KV later fills the cache', async () => {
+  const fallbacks = { FALLBACK_COMMON: { title: 'Hello' } }
+  // Read by the KV stand-in at call time: failing first, healthy after.
+  const options: Setup = { kvThrows: true, fallbacks, kv: { [kvKey('common')]: { title: 'Hallo' } } }
+  const { i18n, kvCalls, cacheStore, puts, scheduled } = setup(options)
+
+  assert.deepEqual(await i18n.fetchTranslations('de', ['common']), { common: { title: 'Hello' } })
+  assert.equal(scheduled.length, 0, 'waitUntil not called')
+  await Promise.all(scheduled)
+  assert.deepEqual(puts, [], 'no cache write after a KV failure')
+  assert.equal(cacheStore.size, 0, 'the cache stays empty')
+
+  options.kvThrows = false
+  assert.deepEqual(await i18n.fetchTranslations('de', ['common']), { common: { title: 'Hallo' } })
+  assert.deepEqual(kvCalls, [[kvKey('common')], [kvKey('common')]], 'a cache miss, so KV is read again')
+  await Promise.all(scheduled)
+  assert.deepEqual(
+    puts.map(({ url, body }) => ({ url, body })),
+    [{ url: cacheUrl('common'), body: { title: 'Hallo' } }],
+  )
 })
 
 test('a cache hit is merged with a newer fallback key (ADR-0014)', async () => {

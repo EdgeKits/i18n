@@ -10,3 +10,5 @@ All notable changes to this package are documented here. The format follows
   the app's server function (`createTranslationsLoader`), the namespace validator
   (`isNamespaceList`), and the React entry (`I18nProvider`, `useI18n`, `useT`, the headless
   `LanguageSwitcher`), over `@edgekits/i18n-core`.
+- `isNamespaceList` rejects an empty list, repeats and a list longer than `NAMESPACE_KEYS`;
+  `createTranslationsLoader` drops repeats before reading KV.

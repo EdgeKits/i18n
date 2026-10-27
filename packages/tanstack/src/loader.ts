@@ -14,11 +14,12 @@ export type LoadedTranslations<L extends string, N extends Namespace> = {
 /**
  * The body of the app's translations server function: the request's locale (the same
  * cascade as the middleware) and the namespaces asked for in it. The namespaces come from
- * the browser: validate them with `isNamespaceList` before they reach this.
+ * the browser: validate them with `isNamespaceList` before they reach this. Repeats are
+ * dropped here as well, for a caller that skips the validator.
  */
 export function createTranslationsLoader<L extends string>(i18n: LoaderI18n<L>, options: RequestLocaleOptions = {}) {
   return async <N extends Namespace>(request: Request, namespaces: readonly N[]): Promise<LoadedTranslations<L, N>> => {
     const locale = await resolveRequestLocale(i18n, request, options)
-    return { locale, translations: await i18n.fetchTranslations(locale, namespaces) }
+    return { locale, translations: await i18n.fetchTranslations(locale, [...new Set(namespaces)]) }
   }
 }

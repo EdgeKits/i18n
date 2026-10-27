@@ -73,7 +73,8 @@ export function createFetchTranslations<L extends string>({
    * (ADR-0014).
    *
    * KV unavailable:
-   *   Falls back to FALLBACK_* compiled dictionaries (always available).
+   *   Falls back to FALLBACK_* compiled dictionaries (always available), and caches
+   *   nothing: only values read from KV are written to the cache.
    *   If none were generated, returns empty objects per namespace — no crash.
    */
   async function fetchTranslations<N extends Namespace>(locale: L, namespaces: readonly N[]): Promise<PickSchema<N>> {
@@ -187,6 +188,11 @@ export function createFetchTranslations<L extends string>({
 
       ;(finalData as any)[ns] = nsData
 
+      // Only a value that came from KV is cached. After a KV failure nsData is the
+      // compiled fallback alone (the default locale's text, whatever `locale` asked for),
+      // and an immutable year-long entry would serve it until the next purge.
+      if (kvFailed) continue
+
       // Cache the resolved namespace individually with a long TTL.
       // Invalidation is handled explicitly via Cloudflare Purge API —
       // no TTL-based expiry needed here.
@@ -217,6 +223,8 @@ export function createFetchTranslations<L extends string>({
       bindings.waitUntil(Promise.all(putPromises))
 
       debug('i18n cache PUT scheduled', { locale, missingNamespaces })
+    } else if (kvFailed) {
+      debug('i18n cache PUT skipped: KV failed, the fallbacks are not cached', { locale, missingNamespaces })
     }
 
     return finalData as PickSchema<N>

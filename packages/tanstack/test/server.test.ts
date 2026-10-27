@@ -104,7 +104,7 @@ test('isNamespaceList accepts only arrays of generated namespaces', () => {
 
   assert.equal(isNamespaces(['common']), true)
   assert.equal(isNamespaces(['common', 'home']), true)
-  assert.equal(isNamespaces([]), true)
+  assert.equal(isNamespaces(['home', 'common']), true, 'any order')
 
   assert.equal(isNamespaces(['blog']), false, 'unknown namespace')
   assert.equal(isNamespaces(['common', 'blog']), false, 'one unknown among known')
@@ -116,4 +116,28 @@ test('isNamespaceList accepts only arrays of generated namespaces', () => {
   assert.equal(isNamespaces(null), false)
   assert.equal(isNamespaces(undefined), false)
   assert.equal(isNamespaces({ 0: 'common', length: 1 }), false)
+})
+
+test('isNamespaceList bounds the list: not empty, no repeats, no longer than NAMESPACE_KEYS', () => {
+  const isNamespaces = isNamespaceList(i18n)
+
+  assert.equal(isNamespaces([]), false, 'an empty list asks for nothing')
+  assert.equal(isNamespaces(['common', 'common']), false, 'a repeat')
+  assert.equal(isNamespaces(['home', 'common', 'home']), false, 'a repeat among distinct names')
+  // Longer than the two generated namespaces: past the 100-key KV batch, one cache lookup each.
+  assert.equal(isNamespaces(Array.from({ length: 101 }, () => 'common')), false, 'oversized')
+  assert.equal(isNamespaces(['common', 'home', 'blog']), false, 'one more than NAMESPACE_KEYS')
+})
+
+test('the loader drops repeats before reading KV, for a caller that skips the validator', async () => {
+  const fixture = createFixture({ 'common:de': { title: 'Hallo' } })
+  const load = createTranslationsLoader(fixture.i18n)
+
+  const result = await load(new Request('https://app.test/', { headers: { cookie: 'lang=de' } }), [
+    'common',
+    'common',
+    'common',
+  ])
+  assert.deepEqual(result, { locale: 'de', translations: { common: { title: 'Hallo' } } })
+  assert.deepEqual(fixture.reads, [['tanstack.test:common:de']], 'one key, once')
 })
