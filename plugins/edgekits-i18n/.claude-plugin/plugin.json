@@ -1,6 +1,6 @@
 {
   "name": "edgekits-i18n",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "displayName": "EdgeKits i18n",
   "description": "Edge-native i18n on Cloudflare Workers, two skills: astro-i18n adopts @edgekits/astro-i18n in an Astro site; tanstack-i18n adopts @edgekits/tanstack-i18n in a TanStack Start app sharing the same translations.",
   "author": {

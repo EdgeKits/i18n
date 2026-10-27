@@ -1,6 +1,6 @@
 {
   "name": "@edgekits/i18n-core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "The EdgeKits edge-native i18n engine, free of any framework: translations in Workers KV, a per-namespace edge cache invalidated by the Purge API, typed keys, and the edgekits-i18n CLI.",
   "keywords": [
     "i18n",

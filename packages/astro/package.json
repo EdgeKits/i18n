@@ -1,6 +1,6 @@
 {
   "name": "@edgekits/astro-i18n",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Edge-native i18n for Astro on Cloudflare Workers: translations in Workers KV, a per-namespace edge cache invalidated by the Purge API, and typed keys.",
   "keywords": [
     "astro",
@@ -57,7 +57,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@edgekits/i18n-core": "0.2.1"
+    "@edgekits/i18n-core": "0.2.2"
   },
   "peerDependencies": {
     "@astrojs/cloudflare": "^14.3.0",

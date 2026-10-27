@@ -84,8 +84,9 @@ codes and no-zod-in-the-browser items hold always.
 - [ ] The form's `action` carries a fragment (`actions.x + '#<id>'`) and the form's wrapper has
       that `id`, so the no-JS result opens in view.
 - [ ] `src/middleware.ts` runs `redirectAfterNativePost` for the form's action: a successful
-      native POST answers 303 to `<page>?sent=1#<id>`, an error renders in place; a reload after
-      success is a GET.
+      native POST answers 303 to `<page>?sent=1#<id>`, where `<page>` is the URL the form was
+      posted from in both routing modes (`/` stays `/`, never `/<default>/`); an error renders
+      in place; a reload after success is a GET.
 - [ ] The action throws `ActionError({ message: CODE, code: 'BAD_REQUEST' | 'INTERNAL_SERVER_ERROR' })`.
 - [ ] The form is **island-free**: a `.astro` with `<form method="POST" action={actions.x}>` and
       an inline `<script>` calling `enhanceForm(form, clientSchema, action, { tErrors, … })`.

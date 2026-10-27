@@ -253,13 +253,14 @@ export interface FormActionContext<R extends { error?: unknown }, S> {
  * in place, as Astro does by default: the page reads it through `Astro.getActionResult`.
  * RPC calls (the enhanced submit) and every other action pass through untouched.
  */
-export async function redirectAfterNativePost<R extends { error?: unknown }, S>(actionContext: FormActionContext<R, S>, actionName: string, fragment: string, requestContext: { url: URL; redirect: (path: string, status: 303) => Response }, next: () => Promise<Response>): Promise<Response> {
+export async function redirectAfterNativePost<R extends { error?: unknown }, S>(actionContext: FormActionContext<R, S>, actionName: string, fragment: string, requestContext: { originPathname: string; redirect: (path: string, status: 303) => Response }, next: () => Promise<Response>): Promise<Response> {
   const { action } = actionContext
   if (action?.calledFrom !== 'form' || action.name !== actionName) return next()
 
   const result = await action.handler()
   if (!result.error) {
-    return requestContext.redirect(`${requestContext.url.pathname}?sent=1#${fragment}`, 303)
+    // The path the visitor posted to (decoded by Astro: encodeURI keeps the header ASCII).
+    return requestContext.redirect(`${encodeURI(requestContext.originPathname)}?sent=1#${fragment}`, 303)
   }
 
   // Setting the result here also stops Astro from running the action again.
@@ -283,6 +284,9 @@ export const onRequest = sequence(contactFormPost)
 - The rule is a pure function because `astro:actions` resolves only inside workerd; the
   middleware is the thin adapter. With `middleware: 'manual'` the i18n middleware stays the
   first entry of this sequence; in `auto` mode the integration registers it ahead of this file.
+- The 303 goes to `ctx.originPathname`, never `ctx.url.pathname`: in the root routing mode the
+  i18n middleware rewrites `/` to `/<default>/`, so `ctx.url` is the rewritten path and
+  `originPathname` the one the visitor asked for; in `'prefix'` they are equal.
 - Cookies the handler sets ride on the 303.
 - The JS path is untouched: the enhanced submit calls the action by RPC
   (`calledFrom: 'rpc'`), which the function passes through.

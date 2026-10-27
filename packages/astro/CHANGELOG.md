@@ -4,6 +4,14 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## 0.2.2 — 2026-10-27
+
+### Fixed
+
+- `'prefix-except-default'` keeps the query string through its rewrites and redirects: `/?sent=1` renders the success state, and a form posted to `/?_action=…` runs its action.
+- `'prefix-except-default'` serves the default locale's `[lang]` endpoints at the root whatever their extension (`/rss.xml` from `src/pages/[lang]/rss.xml.ts`; `/en/rss.xml` redirects to it); root routes such as `sitemap.xml` are served as they are.
+- The skill's no-JS form recipe (`redirectAfterNativePost`) answers its 303 at `ctx.originPathname`, the path the form was posted from; with `ctx.url.pathname` a root-mode post landed on `/<defaultLocale>/?sent=1` and one more redirect. A project that copied the recipe makes the same change in `src/ui/forms/native-post.ts`.
+
 ## 0.2.1 — 2026-10-27
 
 ### Changed

@@ -323,7 +323,9 @@ In `'prefix-except-default'` the default locale has no prefix here either: with
 - `'prefix-except-default'` (the default when `routing` is left out): the default locale at the
   root (`/`, `/about/`), every other locale under its prefix (`/de/about/`). The middleware
   serves a root URL by rewriting it internally to `/<defaultLocale>/…`, so the URL stays;
-  `/en/about/` redirects permanently to `/about/`. A root URL consults neither Accept-Language
+  `/en/about/` redirects permanently to `/about/`. Rewrites and redirects keep the query string.
+  An endpoint under `src/pages/[lang]/` answers at the root too (`/rss.xml`, and `/en/rss.xml`
+  redirects to it), while a root route of its own (`sitemap.xml`, `robots.txt`) is served as is. A root URL consults neither Accept-Language
   nor the country: only a lang cookie for another locale (the visitor chose it in the switcher)
   redirects, temporarily, to that locale.
 - `'prefix'`: every URL starts with its locale (`/en/about/`); `/` and a URL without a locale

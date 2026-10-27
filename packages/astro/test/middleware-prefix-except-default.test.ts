@@ -12,7 +12,8 @@ import { createI18nMiddleware, type I18nMiddlewareDeps } from '../src/middleware
  * `import.meta.env`, so deterministic normalisations are 301.
  */
 
-type Fake = { cookie?: string; acceptLanguage?: string; country?: string; contentType?: string }
+// `routePattern`: the route Astro matched for the original URL, before any rewrite.
+type Fake = { cookie?: string; acceptLanguage?: string; country?: string; contentType?: string; routePattern?: string }
 type CookieSet = { name: string; value: string }
 
 function middleware(locales: string[], extra: Partial<I18nMiddlewareDeps> = {}) {
@@ -50,6 +51,7 @@ async function run(handler: ReturnType<typeof middleware>, path: string, fake: F
   const context = {
     request,
     url: new URL(request.url),
+    routePattern: fake.routePattern,
     locals,
     cookies: {
       get: (name: string) => (name === 'lang' && fake.cookie !== undefined ? { value: fake.cookie } : undefined),
@@ -234,5 +236,77 @@ test('one configured locale: the mode degenerates on its own', async (t) => {
       assert.equal(response.status, 200, `${path} with cookie ${cookie}`)
       assert.equal(nextCalls.length, 1, `${path} with cookie ${cookie}`)
     }
+  }
+})
+
+test('the query string survives every rewrite', async () => {
+  const handler = middleware(FOUR)
+  for (const [path, payload] of [
+    ['/?sent=1', '/en/?sent=1'],
+    ['/about/?_action=newsletter.subscribe', '/en/about/?_action=newsletter.subscribe'],
+    ['/blog/x.md?x=1', '/en/blog/x.md?x=1'],
+  ]) {
+    const { nextCalls } = await run(handler, path!, { contentType: 'text/markdown' })
+    assert.deepEqual(
+      nextCalls.map((c) => c.payload),
+      [payload],
+      path,
+    )
+  }
+})
+
+test('the query string survives every redirect', async () => {
+  const handler = middleware(FOUR)
+  const cookie = await run(handler, '/?x=1', { cookie: 'de' })
+  assertRedirect(cookie.response, 302, '/de/?x=1')
+  assert.equal(cookie.response.headers.get('Vary'), 'Cookie')
+  assertRedirect((await run(handler, '/en/?x=1')).response, 301, '/?x=1')
+  assertRedirect((await run(handler, '/en/about?x=1')).response, 301, '/about/?x=1')
+  assertRedirect((await run(handler, '/about?x=1')).response, 301, '/about/?x=1')
+  assertRedirect((await run(handler, '/de/about?x=1')).response, 301, '/de/about/?x=1')
+})
+
+test('a locale-less path of a [lang] route is served for the default locale, whatever its extension', async () => {
+  const handler = middleware(FOUR)
+  const xml = { contentType: 'application/rss+xml' }
+  // Astro matches `/rss.xml` against `/[lang]` (lang = "rss.xml"), or nothing (its 404 route).
+  for (const routePattern of ['/[lang]', '/[lang]/rss.xml', '/404']) {
+    const { response, nextCalls } = await run(handler, '/rss.xml?x=1', { ...xml, routePattern })
+    assert.equal(response.status, 200, routePattern)
+    assert.deepEqual(nextCalls, [{ payload: '/en/rss.xml?x=1', locals: { uiLocale: 'en', translationLocale: 'en' } }])
+  }
+  // Rewritten, then nothing renders but the 404 page: the soft 404.
+  const missing = await run(handler, '/missing.xml', { routePattern: '/[lang]' })
+  assert.equal(missing.response.status, 404)
+  assert.equal(missing.response.headers.get('Content-Type'), 'text/plain; charset=utf-8')
+})
+
+test("a [lang] route's /<default>/… form normalises permanently, without a trailing slash", async () => {
+  const handler = middleware(FOUR)
+  const { response, nextCalls } = await run(handler, '/en/rss.xml?x=1', { routePattern: '/[lang]/rss.xml' })
+  assertRedirect(response, 301, '/rss.xml?x=1')
+  assert.equal(nextCalls.length, 0)
+  // No [lang] route behind it: no redirect, the soft 404.
+  assert.equal((await run(handler, '/en/missing.xml', { routePattern: '/404' })).response.status, 404)
+})
+
+test('root routes, ignored prefixes and other locales pass through unrewritten', async () => {
+  const handler = middleware(FOUR)
+  for (const [path, routePattern] of [
+    ['/sitemap.xml', '/sitemap.xml'],
+    ['/robots.txt', '/robots.txt'],
+    ['/llms.txt', '/llms.txt'],
+    ['/feeds/main.json', '/feeds/[id].json'],
+    ['/favicon.ico', '/404'],
+    ['/api/data.json', '/404'],
+    ['/_astro/x.js', '/404'],
+    ['/de/rss.xml', '/[lang]/rss.xml'],
+  ]) {
+    const { nextCalls } = await run(handler, path!, { contentType: 'application/xml', routePattern })
+    assert.deepEqual(
+      nextCalls.map((c) => c.payload),
+      [undefined],
+      path,
+    )
   }
 })
