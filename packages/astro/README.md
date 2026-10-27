@@ -627,7 +627,8 @@ the only sensible one and needs no question.
   `src/i18n.generated.d.ts`, `src/i18n/runtime-constants.ts`, `src/i18n/fallbacks.generated.ts`.
   Commit them.
 - The route layout: `src/pages/about.astro` becomes `src/pages/[lang]/about.astro`, and so on.
-  The root `index.astro` moves too, since the middleware redirects `/` to `/<locale>/`.
+  The root `index.astro` moves too: in `'prefix'` the middleware redirects `/` to
+  `/<locale>/`, and in `'prefix-except-default'` it serves the default locale's page there.
   Endpoints that are not localized (`robots.txt`, `sitemap.xml`, `/api/*`) and `public/` stay
   where they are.
 - `src/components/Flag.astro` and one SVG per flag in `public/flags/`, if you chose flags (the

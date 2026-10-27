@@ -59,40 +59,40 @@ export function defineI18nConfig<const C extends I18nConfig>(
   const locales = Object.keys(config.languages ?? {})
 
   if (locales.length === 0) {
-    throw new Error('[@edgekits/astro-i18n] `languages` must define at least one locale.')
+    throw new Error('[@edgekits/i18n-core] `languages` must define at least one locale.')
   }
   // Lowercase everywhere (config, `locales/` folders, URLs); `toIetfTag` relies on it.
   for (const locale of locales) {
     if (locale !== locale.toLowerCase()) {
       throw new Error(
-        `[@edgekits/astro-i18n] \`languages\` key "${locale}" is not lowercase (use "${locale.toLowerCase()}").`,
+        `[@edgekits/i18n-core] \`languages\` key "${locale}" is not lowercase (use "${locale.toLowerCase()}").`,
       )
     }
   }
   if (!locales.includes(config.defaultLocale)) {
     throw new Error(
-      `[@edgekits/astro-i18n] \`defaultLocale\` "${config.defaultLocale}" is not one of \`languages\`: ${locales.join(', ')}.`,
+      `[@edgekits/i18n-core] \`defaultLocale\` "${config.defaultLocale}" is not one of \`languages\`: ${locales.join(', ')}.`,
     )
   }
   if (config.markdownLocale !== undefined && !locales.includes(config.markdownLocale)) {
     throw new Error(
-      `[@edgekits/astro-i18n] \`markdownLocale\` "${config.markdownLocale}" is not one of \`languages\`: ${locales.join(', ')}.`,
+      `[@edgekits/i18n-core] \`markdownLocale\` "${config.markdownLocale}" is not one of \`languages\`: ${locales.join(', ')}.`,
     )
   }
   if (config.routing !== undefined && !ROUTINGS.includes(config.routing)) {
     throw new Error(
-      `[@edgekits/astro-i18n] \`routing\` "${String(config.routing)}" is not supported; use 'prefix' or 'prefix-except-default'.`,
+      `[@edgekits/i18n-core] \`routing\` "${String(config.routing)}" is not supported; use 'prefix' or 'prefix-except-default'.`,
     )
   }
   for (const [country, locale] of Object.entries(config.countryToLocale ?? {})) {
     if (!COUNTRY_CODE.test(country)) {
       throw new Error(
-        `[@edgekits/astro-i18n] \`countryToLocale\` key "${country}" is not an uppercase ISO 3166-1 alpha-2 country code.`,
+        `[@edgekits/i18n-core] \`countryToLocale\` key "${country}" is not an uppercase ISO 3166-1 alpha-2 country code.`,
       )
     }
     if (!locales.includes(locale)) {
       throw new Error(
-        `[@edgekits/astro-i18n] \`countryToLocale\` maps "${country}" to "${locale}", which is not one of \`languages\`: ${locales.join(', ')}.`,
+        `[@edgekits/i18n-core] \`countryToLocale\` maps "${country}" to "${locale}", which is not one of \`languages\`: ${locales.join(', ')}.`,
       )
     }
   }

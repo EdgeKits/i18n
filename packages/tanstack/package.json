@@ -1,6 +1,6 @@
 {
   "name": "@edgekits/tanstack-i18n",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "description": "Edge-native i18n for TanStack Start on Cloudflare Workers: a Hono locale middleware, a translations loader for server functions, and a React provider over the EdgeKits engine.",
   "keywords": [
     "tanstack",
@@ -55,7 +55,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@edgekits/i18n-core": "0.1.8"
+    "@edgekits/i18n-core": "0.2.0"
   },
   "peerDependencies": {
     "hono": "^4",

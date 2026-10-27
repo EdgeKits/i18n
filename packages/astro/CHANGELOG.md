@@ -4,6 +4,28 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## 0.2.0 — 2026-10-27
+
+### Changed
+
+- The package is an adapter over [`@edgekits/i18n-core`](https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#readme), the framework-free engine extracted from it. Same entries, same exports, same generated files. The `edgekits-i18n` command now ships with the core and reaches your project's `.bin` through this package's dependency; `jiti` and `jsonc-parser` are no longer direct dependencies of this package. Config validation errors are prefixed `[@edgekits/i18n-core]`.
+- The switcher's client script builds its target URL through the routing mode, so the one script Astro inlines per page changes.
+- A project's own Astro `i18n` block must keep `prefixDefaultLocale: true`, in both routing modes (the build stops otherwise): Astro checks the URL after the middleware, on the rewritten `/<defaultLocale>/…` path, and with `false` it would answer 404 there.
+
+### Added
+
+- `routing: 'prefix-except-default'`: the default locale at the root (`/`, `/about/`), the other locales under their prefix (`/de/about/`). It is the default when `routing` is left out, so new projects get it. Configs that say `routing: 'prefix'` are unchanged. See README "Routing modes".
+- `localizedPath` in `/runtime` (and `./format`): the path of a page in a locale for either mode, for links, canonical, hreflang and sitemaps.
+- `<language-switcher>` carries `data-routing` and `data-default-locale`.
+
+### Fixed
+
+- After a failed KV read, the fallback text is no longer written to the edge cache for the requested locale. It was cached for a year, so one KV error could leave a locale showing default-locale text until the next `migrate` purged it.
+
+### Docs
+
+- The skill asks the routing question, its SEO references build links, canonical, hreflang and the sitemap with `localizedPath`, and the plugin ships a second skill, `tanstack-i18n`.
+
 ## 0.1.8 — 2026-10-18
 
 ### Added

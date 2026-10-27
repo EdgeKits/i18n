@@ -335,7 +335,9 @@ const slug = Astro.params.slug ?? ''
 const altLocales = (await getPostLocales()).get(slug) ?? []
 const contentLocale = altLocales.includes(uiLocale) ? uiLocale : DEFAULT_LOCALE
 const post = altLocales.includes(contentLocale) ? await getEntry('blog', `${contentLocale}/${slug}`) : undefined
-if (!post) return Astro.rewrite(`/${uiLocale}/404/`)
+// Astro.rewrite runs the middleware again: in the root mode a `/<default>/` prefix would be
+// normalised away with a 301, so the target goes through localizedPath.
+if (!post) return Astro.rewrite(localizedPath(uiLocale, '/404/', pathOptions))
 
 const isFallback = contentLocale !== uiLocale
 Astro.locals.isMissingContent = isFallback // the banner shows in 'content' mode

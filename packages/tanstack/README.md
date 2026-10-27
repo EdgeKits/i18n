@@ -89,7 +89,7 @@ path is case-sensitive.
 
 ```ts
 import { createServerFn } from '@tanstack/react-start'
-import { getRequest } from '@tanstack/react-start/server'
+import { getRequest, setResponseHeaders } from '@tanstack/react-start/server'
 import { createTranslationsLoader, isNamespaceList } from '@edgekits/tanstack-i18n'
 
 import { i18n, userPreference } from './instance'
@@ -102,12 +102,17 @@ export const getTranslations = createServerFn({ method: 'GET' })
     if (!isNamespaces(data)) throw new Error('Unknown namespace')
     return data
   })
-  .handler(({ data }) => load(getRequest(), data))
+  .handler(({ data }) => {
+    // The answer depends on the lang cookie: no shared cache may store it for everyone.
+    setResponseHeaders(new Headers({ 'Cache-Control': 'private, no-store', Vary: 'Cookie' }))
+    return load(getRequest(), data)
+  })
 ```
 
-The namespace list comes from the browser: `isNamespaceList` is true only for an array of
-namespaces the CLI generated, and the server function rejects anything else, so an unknown
-name never reaches a KV key. The package ships no server function of its own: Start compiles
+The namespace list comes from the browser: `isNamespaceList` is true only for a non-empty
+array of distinct namespaces the CLI generated, at most as many as there are, and the server
+function rejects anything else, so an unknown name never reaches a KV key and one request
+reads at most every namespace once. The package ships no server function of its own: Start compiles
 one from a dependency too, but it is declared in the app so that the app's own request
 helpers and kernel are in scope. The handler, the instance and the compiled fallbacks stay out
 of the client bundle.

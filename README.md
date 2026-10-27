@@ -2,9 +2,9 @@
 
 This repository is the home of the EdgeKits i18n packages.
 
-- [`packages/core`](packages/core/README.md): `@edgekits/i18n-core`, the engine and the CLI
-- [`packages/astro`](packages/astro/README.md): `@edgekits/astro-i18n`, the Astro adapter over it
-- [`packages/tanstack`](packages/tanstack/README.md): `@edgekits/tanstack-i18n`, for TanStack Start on a Hono Worker
+- [`packages/core`](packages/core/README.md): `@edgekits/i18n-core`, the framework-free engine (KV translations, edge cache, typed keys) and the `edgekits-i18n` CLI
+- [`packages/astro`](packages/astro/README.md): `@edgekits/astro-i18n`, the Astro adapter: integration, locale-routing middleware, components
+- [`packages/tanstack`](packages/tanstack/README.md): `@edgekits/tanstack-i18n`, for TanStack Start on a Hono Worker: locale middleware, translations loader, React provider
 - [`plugins/astro-i18n`](plugins/astro-i18n/): the Claude Code plugin
 
 ## License

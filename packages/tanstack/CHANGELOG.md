@@ -4,11 +4,12 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.0 — 2026-10-27
 
-- First version: the Hono locale middleware (`i18nMiddleware`), the translations loader for
-  the app's server function (`createTranslationsLoader`), the namespace validator
-  (`isNamespaceList`), and the React entry (`I18nProvider`, `useI18n`, `useT`, the headless
-  `LanguageSwitcher`), over `@edgekits/i18n-core`.
-- `isNamespaceList` rejects an empty list, repeats and a list longer than `NAMESPACE_KEYS`;
-  `createTranslationsLoader` drops repeats before reading KV.
+First release, over `@edgekits/i18n-core` 0.2.0, for TanStack Start on a Hono Worker:
+
+- `i18nMiddleware`: sets `c.var.locale` from the cookie, `userPreference`, Accept-Language, the default; never sets a cookie or redirects.
+- `createTranslationsLoader`: the body of the app's own server function, the same cascade plus `fetchTranslations`; drops repeated namespaces.
+- `isNamespaceList`: the validator for the namespace list from the browser: known names only, no repeats, non-empty, at most the generated count.
+- `./react`: `I18nProvider` (nesting, inner namespaces merged over outer), `useI18n`, `useT` typed from the schema.
+- `LanguageSwitcher`: headless, writes the lang cookie, then `afterChange` (e.g. `router.invalidate()`) or a reload.

@@ -1,6 +1,6 @@
 {
   "name": "@edgekits/astro-i18n",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "description": "Edge-native i18n for Astro on Cloudflare Workers: translations in Workers KV, a per-namespace edge cache invalidated by the Purge API, and typed keys.",
   "keywords": [
     "astro",
@@ -16,7 +16,8 @@
   "author": "Gary Stupak",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/EdgeKits/astro-i18n.git"
+    "url": "git+https://github.com/EdgeKits/astro-i18n.git",
+    "directory": "packages/astro"
   },
   "homepage": "https://github.com/EdgeKits/astro-i18n#readme",
   "bugs": {
@@ -56,7 +57,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@edgekits/i18n-core": "0.1.8"
+    "@edgekits/i18n-core": "0.2.0"
   },
   "peerDependencies": {
     "@astrojs/cloudflare": "^14.3.0",
