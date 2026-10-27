@@ -1,0 +1,15 @@
+{
+  "name": "edgekits-i18n",
+  "version": "0.2.1",
+  "displayName": "EdgeKits i18n",
+  "description": "Edge-native i18n on Cloudflare Workers, two skills: astro-i18n adopts @edgekits/astro-i18n in an Astro site; tanstack-i18n adopts @edgekits/tanstack-i18n in a TanStack Start app sharing the same translations.",
+  "author": {
+    "name": "EdgeKits",
+    "url": "https://edgekits.dev"
+  },
+  "homepage": "https://github.com/EdgeKits/i18n",
+  "repository": "https://github.com/EdgeKits/i18n",
+  "privacyPolicyUrl": "https://github.com/EdgeKits/i18n/tree/main/plugins/edgekits-i18n#privacy",
+  "license": "MIT",
+  "keywords": ["astro", "i18n", "cloudflare-workers", "kv", "translations", "localization"]
+}

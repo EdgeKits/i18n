@@ -4,13 +4,13 @@ import path from 'node:path'
 import test from 'node:test'
 
 /**
- * The astro-i18n plugin (plugins/astro-i18n at the repository root), listed by the EdgeKits
+ * The edgekits-i18n plugin (plugins/edgekits-i18n at the repository root), listed by the EdgeKits
  * skills marketplace from this repository. Its version tracks the package's, so a release
  * bumps both.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '..')
-const PLUGIN_DIR = path.join(ROOT, '..', '..', 'plugins', 'astro-i18n')
+const PLUGIN_DIR = path.join(ROOT, '..', '..', 'plugins', 'edgekits-i18n')
 const SKILL_DIR = path.join(PLUGIN_DIR, 'skills', 'astro-i18n')
 // The plugin's skills: `astro-i18n` for Astro sites, `tanstack-i18n` for TanStack Start apps.
 const SKILLS = ['astro-i18n', 'tanstack-i18n']
@@ -40,7 +40,7 @@ test('plugin.json parses with the required fields; its version is the package ve
   for (const field of ['name', 'version', 'displayName', 'description', 'homepage', 'repository', 'license']) {
     assert.equal(typeof manifest[field], 'string', field)
   }
-  assert.equal(manifest.name, 'astro-i18n')
+  assert.equal(manifest.name, 'edgekits-i18n')
   assert.equal(manifest.license, 'MIT')
   assert.deepEqual(manifest.author, { name: 'EdgeKits', url: 'https://edgekits.dev' })
   assert.ok(Array.isArray(manifest.keywords) && manifest.keywords.length > 0, 'keywords')

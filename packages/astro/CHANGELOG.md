@@ -4,6 +4,12 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## 0.2.1 — 2026-10-27
+
+### Changed
+
+- The Claude Code plugin is `edgekits-i18n` (was `astro-i18n`): install `edgekits-i18n@edgekits`. An existing `astro-i18n@edgekits` install is not updated: remove it and install the new name. No code change.
+
 ## 0.2.0 — 2026-10-27
 
 ### Changed

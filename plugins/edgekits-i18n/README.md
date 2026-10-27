@@ -1,10 +1,12 @@
-# Astro i18n (EdgeKits)
+# EdgeKits i18n
 
-A free agent skill for Claude Code, Cursor, OpenCode and any other coding agent that reads `SKILL.md`. Tell your
-agent to make your Astro site multilingual, and it adopts [`@edgekits/astro-i18n`](https://github.com/EdgeKits/i18n):
-translations stored as data in Workers KV, a per-namespace edge cache that is purged only where content changed,
-and translation keys typed from your default locale's JSON. It asks the few questions only you can answer
-(locales, default locale, geo and markdown policy, flags), follows the package README in order, and checks the result.
+Two free agent skills for Claude Code, Cursor, OpenCode and any other coding agent that reads `SKILL.md`:
+`astro-i18n` makes an Astro site multilingual with [`@edgekits/astro-i18n`](https://github.com/EdgeKits/i18n);
+`tanstack-i18n` does the same for a TanStack Start app with `@edgekits/tanstack-i18n`, sharing the site's
+translations. With `astro-i18n`, translations are stored as data in Workers KV, behind a per-namespace edge cache
+that is purged only where content changed, and translation keys are typed from your default locale's JSON. It asks
+the few questions only you can answer (locales, default locale, geo and markdown policy, flags), follows the package
+README in order, and checks the result.
 
 It also covers what comes after the setup: localized forms the EdgeKits way (validation errors as stable codes,
 no client framework and no zod in the browser), and multilingual SEO (`<html lang>`, hreflang, sitemap, RSS,
@@ -23,7 +25,7 @@ which shares the translations folder and the KV namespace with the monorepo's ot
 `astro-i18n` is a free agent skill that sets up `@edgekits/astro-i18n` in your project and keeps
 working with it afterwards. It runs in Claude Code as a plugin, and in Cursor, OpenCode or any other
 coding agent that reads `SKILL.md`. Its source is in
-[`plugins/astro-i18n`](https://github.com/EdgeKits/i18n/tree/main/plugins/astro-i18n).
+[`plugins/edgekits-i18n`](https://github.com/EdgeKits/i18n/tree/main/plugins/edgekits-i18n).
 
 ### What it does
 
@@ -54,7 +56,7 @@ In Claude Code, add the EdgeKits marketplace once, then install the plugin:
 
 ```
 /plugin marketplace add EdgeKits/skills
-/plugin install astro-i18n@edgekits
+/plugin install edgekits-i18n@edgekits
 ```
 
 That installs it for you, in every project. To set it up for everyone working on one
@@ -62,11 +64,11 @@ repository, run these in the repository and commit `.claude/settings.json`:
 
 ```sh
 claude plugin marketplace add EdgeKits/skills --scope project
-claude plugin install astro-i18n@edgekits --scope project
+claude plugin install edgekits-i18n@edgekits --scope project
 ```
 
 The first command declares the EdgeKits marketplace in `.claude/settings.json`; the second
-turns the plugin on there, under `enabledPlugins` (`"astro-i18n@edgekits": true`). Claude Code
+turns the plugin on there, under `enabledPlugins` (`"edgekits-i18n@edgekits": true`). Claude Code
 honours those entries for a teammate once they trust the folder, but it does not download the
 plugin for them: each teammate runs the same `claude plugin install … --scope project` once.
 
@@ -77,7 +79,7 @@ adds the marketplace: `/plugin marketplace add EdgeKits/skills`, or the CLI line
 `--scope project` above. Declaring it in `.claude/settings.json` under `extraKnownMarketplaces`,
 keyed by the marketplace's name as in the block below, spares them that step once they trust the
 folder. In both cases the plugin itself is still installed once per contributor with
-`claude plugin install astro-i18n@edgekits --scope project`, as the paragraph above says.
+`claude plugin install edgekits-i18n@edgekits --scope project`, as the paragraph above says.
 
 ```json
 {
@@ -87,7 +89,7 @@ folder. In both cases the plugin itself is still installed once per contributor 
     }
   },
   "enabledPlugins": {
-    "astro-i18n@edgekits": true
+    "edgekits-i18n@edgekits": true
   }
 }
 ```
