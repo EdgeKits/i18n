@@ -6,9 +6,11 @@ export type { Locale }
 
 export type Language = I18nLanguage
 
-// Languages are configured in the project's edgekits-i18n.config.ts; the derivation is
-// `localesOf` (config.entry.ts), shared with project code. Inside the package the config
-// is not literal, so its keys are narrowed to the augmented `Locale` here.
+// Languages are configured in the project's edgekits-i18n.config.ts; the derivation is the
+// core's `localesOf`, shared with project code and with `createI18n` (instance.ts). Taken
+// from the config, not the instance, so the components that need only these constants
+// reach neither `cloudflare:workers` nor the generated modules. Inside the package the
+// config is not literal, so its keys are narrowed to the augmented `Locale` here.
 const LOCALES = localesOf(I18N_CONFIG)
 
 export const LANGUAGES = LOCALES.LANGUAGES as Record<Locale, Language>

@@ -7,20 +7,20 @@ import test from 'node:test'
  * Boundary guard for the package source: every specifier `src/` reaches for is a
  * dependency the package would have to carry, so only these are allowed.
  *
- * Runtime code (everything outside `src/integration/` and `src/cli/`; it runs in workerd):
+ * Runtime code (everything outside `src/integration/`; it runs in workerd):
  *   - a relative path resolving inside `src/`;
- *   - `astro`, `astro/zod`, `cloudflare:workers`;
+ *   - `astro`, `astro/zod`, `cloudflare:workers`, `@edgekits/i18n-core` and its `./format`;
  *   - `virtual:@edgekits/astro-i18n/*` (served by the integration's Vite plugin).
  *
- * Build-time code (`src/integration/`, run by Astro while it loads its config, and
- * `src/cli/`, run by the `edgekits-i18n` bin; both run in Node):
+ * Build-time code (`src/integration/`, run by Astro in Node while it loads its config):
  *   - a relative path resolving inside `src/`;
- *   - `astro`, `node:*`, and the packages declared in package.json `dependencies`.
+ *   - `astro`, `@edgekits/i18n-core` and its `./format`, `node:*`, and the packages
+ *     declared in package.json `dependencies`.
  *
  * Anything else is a violation: any `@/…` specifier (the package has no `@/`), any
  * other bare package (`@tabler/…` included: project UI reaches engine components as
  * props), a relative path escaping `src/`, or a build-time import (`node:*`, a declared
- * dependency) outside `src/integration/` and `src/cli/`.
+ * dependency other than the core) outside `src/integration/`.
  *
  * Specifiers are collected from `import … from`, side-effect `import '…'`,
  * `export … from` and `import('…')`, `import type` included. Imports inside an
@@ -33,14 +33,15 @@ const SRC_DIR = path.join(ROOT, 'src')
 // `typeOnly`: an `import type` / `export type` statement, erased before anything loads.
 type Edge = { file: string; specifier: string; typeOnly?: boolean }
 
-const RUNTIME_ALLOWED = new Set(['astro', 'astro/zod', 'cloudflare:workers'])
+const CORE_ENTRIES = ['@edgekits/i18n-core', '@edgekits/i18n-core/format']
+const RUNTIME_ALLOWED = new Set(['astro', 'astro/zod', 'cloudflare:workers', ...CORE_ENTRIES])
 const VIRTUAL_PREFIX = 'virtual:@edgekits/astro-i18n/'
-const BUILD_TIME_DIRS = ['integration/', 'cli/']
+const BUILD_TIME_DIRS = ['integration/']
 const DEPENDENCIES = Object.keys(
   (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> })
     .dependencies ?? {},
 )
-const BUILD_TIME_ALLOWED = new Set(['astro', ...DEPENDENCIES])
+const BUILD_TIME_ALLOWED = new Set(['astro', ...CORE_ENTRIES, ...DEPENDENCIES])
 
 const isBuildTime = (file: string) => BUILD_TIME_DIRS.some((dir) => file.startsWith(dir))
 const CONFIG_ID = `${VIRTUAL_PREFIX}config`
@@ -109,10 +110,6 @@ test('the scanner sees the package (non-vacuous)', () => {
     edges.some((e) => e.file.startsWith('integration/') && e.specifier.startsWith('node:')),
     'integration node: edge found',
   )
-  assert.ok(
-    edges.some((e) => e.file.startsWith('cli/') && DEPENDENCIES.includes(e.specifier)),
-    'cli dependency edge found',
-  )
   assert.ok(DEPENDENCIES.length > 0, 'package.json dependencies read')
   assert.ok(
     edges.some((e) => key(e) === `schema.ts -> ${VIRTUAL_PREFIX}runtime-constants`),
@@ -138,16 +135,8 @@ test('the classifier rejects what the boundary forbids', () => {
   assert.ok(!isViolation({ file: 'fetcher.ts', specifier: `${VIRTUAL_PREFIX}fallbacks` }))
 })
 
-test('node: imports and dependencies are allowed in src/integration/ and src/cli/ only', () => {
+test('node: imports and dependencies are allowed in src/integration/ only', () => {
   assert.ok(!isViolation({ file: 'integration/vite-plugin.ts', specifier: 'node:fs' }))
-  assert.ok(!isViolation({ file: 'cli/index.ts', specifier: 'node:child_process' }))
-  assert.ok(!isViolation({ file: 'cli/load-config.ts', specifier: 'jiti' }))
-  assert.ok(!isViolation({ file: 'cli/wrangler.ts', specifier: 'jsonc-parser' }))
-  assert.ok(isViolation({ file: 'cli/index.ts', specifier: 'chalk' }), 'undeclared package')
-  assert.ok(
-    isViolation({ file: 'cli/index.ts', specifier: `${VIRTUAL_PREFIX}config` }),
-    'virtual modules are runtime-only',
-  )
   assert.ok(isViolation({ file: 'fetcher.ts', specifier: 'jiti' }))
   assert.ok(isViolation({ file: 'key-format.ts', specifier: 'jsonc-parser' }))
   assert.ok(isViolation({ file: 'fetcher.ts', specifier: 'node:fs' }))

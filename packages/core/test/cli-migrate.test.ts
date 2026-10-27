@@ -71,7 +71,7 @@ function migrate(root: string): { out: string; err: string } {
     process.execPath,
     [
       '--import',
-      pathToFileURL(path.join(ROOT, 'test/register.mjs')).href,
+      import.meta.resolve('tsx'),
       '--import',
       pathToFileURL(path.join(root, 'fake-fetch.mjs')).href,
       path.join(ROOT, 'src/cli/index.ts'),

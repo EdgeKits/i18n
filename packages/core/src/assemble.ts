@@ -1,4 +1,4 @@
-import { deepMerge } from './deep-merge'
+import { deepMerge } from './deep-merge.ts'
 
 /**
  * Assemble a single translation namespace from a raw value and its compiled

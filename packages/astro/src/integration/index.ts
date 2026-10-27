@@ -1,6 +1,6 @@
 import type { AstroConfig, AstroIntegration } from 'astro'
+import { DEFAULT_GENERATED_DIR, defineI18nConfig, type I18nConfig } from '@edgekits/i18n-core'
 
-import { DEFAULT_GENERATED_DIR, defineI18nConfig, type I18nConfig } from '../types.ts'
 import { i18nVitePlugin } from './vite-plugin.ts'
 import { virtualModulesDeclaration } from './virtual-types.ts'
 
@@ -22,6 +22,8 @@ export const PACKAGE_NAME = '@edgekits/astro-i18n'
 export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = {}): AstroIntegration {
   const i18nConfig = defineI18nConfig(config)
   const middleware = options.middleware ?? 'auto'
+
+  assertRouting(i18nConfig)
 
   if (!MIDDLEWARE_MODES.includes(middleware)) {
     throw new Error(
@@ -66,8 +68,23 @@ export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = 
   }
 }
 
-// Each entry that exports `I18nLocales` from its own declaration: the root entry's comes
-// from dist/types.d.ts, the runtime entry's from the shipped source (src/types.ts).
+/**
+ * The core accepts `routing` absent, 'prefix' or 'prefix-except-default'; the middleware
+ * implements 'prefix' only so far, so anything else stops at config time.
+ */
+function assertRouting(config: I18nConfig): void {
+  if (config.routing === 'prefix') return
+
+  throw new Error(
+    config.routing === undefined
+      ? "[@edgekits/astro-i18n] `routing` is required: set `routing: 'prefix'`, the only mode the Astro adapter supports so far."
+      : `[@edgekits/astro-i18n] \`routing\` "${config.routing}" is not supported by the Astro adapter yet; use 'prefix'.`,
+  )
+}
+
+// Each entry that exports `I18nLocales`: both re-export the core's interface (root through
+// dist/types.d.ts, runtime through the shipped src/types.ts), so either augmentation
+// merges into it; both are kept so neither entry depends on how the other resolves.
 const LOCALE_MODULES = ['@edgekits/astro-i18n', '@edgekits/astro-i18n/runtime']
 
 /**

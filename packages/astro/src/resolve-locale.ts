@@ -1,40 +1,17 @@
 import type { AstroGlobal } from 'astro'
 
+import { i18n } from './instance'
 import { LocaleSchema } from './schema'
 import type { Locale } from './constants'
-import { DEFAULT_LOCALE, ENABLE_MISSING_TRANSLATION_BANNER } from './constants'
-import { LOCALES_WITH_TRANSLATIONS, FULLY_TRANSLATED_LOCALES } from 'virtual:@edgekits/astro-i18n/runtime-constants'
-
-// Checking for the presence of at least one file with translations
-function hasTranslations(locale: Locale): boolean {
-  return (LOCALES_WITH_TRANSLATIONS as readonly string[]).includes(locale)
-}
-
-// Checking the completeness of translations
-function isFullyTranslated(locale: Locale): boolean {
-  return (FULLY_TRANSLATED_LOCALES as readonly string[]).includes(locale)
-}
+import { DEFAULT_LOCALE } from './constants'
 
 /**
- * Optional: return a “missing translation” banner message
- * when uiLocale has no translations or (blog) content is missing in required language.
- *
- * Returns:
- *   - MissingTranslationType: type of message to show ('ui' or 'content')
- *   - null: if banner should not be shown
+ * Optional: which “missing translation” banner to show ('ui' or 'content'), or null for
+ * none, when uiLocale has no translations or (blog) content is missing in the required
+ * language. Translation locale: what is actually loaded from KV, the default locale when
+ * there is no bundle for the UI locale. Both are the core's (`createI18n`).
  */
-type MissingTranslationType = 'ui' | 'content' | null
-
-export function checkMissingTranslation(
-  uiLocale: Locale,
-  isMissingContent: boolean | undefined,
-): MissingTranslationType {
-  if (!ENABLE_MISSING_TRANSLATION_BANNER) return null
-
-  if (isFullyTranslated(uiLocale) && !isMissingContent) return null
-
-  return isMissingContent ? 'content' : 'ui'
-}
+export const { checkMissingTranslation, resolveLocaleForTranslations } = i18n
 
 /**
  * UI / routing locale:
@@ -45,13 +22,4 @@ export function resolveLocale(Astro: AstroGlobal): Locale {
   const raw = Astro.currentLocale ?? DEFAULT_LOCALE
   const parsed = LocaleSchema.safeParse(raw)
   return parsed.success ? parsed.data : DEFAULT_LOCALE
-}
-
-/**
- * Translation locale:
- * - What we actually load from KV
- * - Falls back if there is no bundle for the UI locale
- */
-export function resolveLocaleForTranslations(locale: Locale): Locale {
-  return hasTranslations(locale) ? locale : DEFAULT_LOCALE
 }

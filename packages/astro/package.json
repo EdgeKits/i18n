@@ -37,9 +37,6 @@
     "./components/*": "./src/components/*.astro",
     "./package.json": "./package.json"
   },
-  "bin": {
-    "edgekits-i18n": "dist/cli/index.js"
-  },
   "files": [
     "dist",
     "src",
@@ -59,8 +56,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "jiti": "^2.7.0",
-    "jsonc-parser": "^3.3.1"
+    "@edgekits/i18n-core": "0.1.8"
   },
   "peerDependencies": {
     "@astrojs/cloudflare": "^14.3.0",
@@ -68,13 +64,6 @@
     "wrangler": "^4.125.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261011.1",
-    "@types/node": "^25.9.1",
-    "astro": "^7.3.8",
-    "prettier": "3.9.4",
-    "prettier-plugin-astro": "0.14.1",
-    "prettier-plugin-tailwindcss": "0.8.0",
-    "tsx": "^4.23.12",
-    "typescript": "~5.9.3"
+    "astro": "^7.3.8"
   }
 }

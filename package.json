@@ -9,10 +9,19 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
-    "test": "npm test --workspaces",
-    "typecheck": "npm run typecheck --workspaces",
+    "build": "npm run build -w @edgekits/i18n-core && npm run build -w @edgekits/astro-i18n",
+    "test": "npm run build -w @edgekits/i18n-core && npm test --workspaces",
+    "typecheck": "npm run build -w @edgekits/i18n-core && npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261011.1",
+    "@types/node": "^25.9.1",
+    "prettier": "3.9.4",
+    "prettier-plugin-astro": "0.14.1",
+    "prettier-plugin-tailwindcss": "0.8.0",
+    "tsx": "^4.23.12",
+    "typescript": "~5.9.3"
   }
 }

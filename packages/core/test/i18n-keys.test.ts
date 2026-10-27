@@ -1,11 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {
-  buildTranslationCacheRequest,
-  buildTranslationCacheUrl,
-  buildTranslationKvKey,
-} from '../src/translations-keys.ts'
+import { buildTranslationCacheRequest, buildTranslationCacheUrl, buildTranslationKvKey } from './fixtures/instance.ts'
 
 /**
  * Pins the translation KV keys and edge-cache URLs byte for byte. Production KV
@@ -13,8 +9,8 @@ import {
  * change here orphans the stored translations and leaves stale cache entries
  * that never age out (`s-maxage=31536000, immutable`).
  *
- * The config is the fixture (`test/fixtures/i18n.config.ts`, keyPrefix `edgekits.dev`),
- * served in place of the integration's virtual config by tsconfig.test.json.
+ * The builders are an instance's (`createI18n`) over the fixture config
+ * (`test/fixtures/i18n.config.ts`, keyPrefix `edgekits.dev`).
  */
 
 test('KV key is <prefix>:<namespace>:<locale>', () => {

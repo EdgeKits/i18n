@@ -1,10 +1,13 @@
 import type { MiddlewareHandler } from 'astro'
+import {
+  MARKDOWN_PATH,
+  markdownRedirectTarget,
+  resolveFallbackLocale as resolveFallbackFrom,
+} from '@edgekits/i18n-core'
 import { LocaleSchema } from '../schema'
 import { I18N_CONFIG } from '../config'
 import { DEFAULT_LOCALE, type Locale } from '../constants'
 import { getCookieLang, readCookieLang, setCookieLang } from '../cookie-storage'
-import { resolveFallbackLocale as resolveFallbackFrom } from '../locale-fallback'
-import { MARKDOWN_PATH, markdownRedirectTarget } from '../markdown-path'
 import { resolveLocaleForTranslations } from '../resolve-locale'
 
 // Regex to identify public static assets (images, fonts, scripts, etc.)
@@ -83,7 +86,7 @@ function buildLocalizedPath(locale: Locale, rest: string[]): string {
 }
 
 // Resolves the most appropriate locale for the user based on a fallback cascade
-// (locale-fallback.ts, where the order is documented and tested):
+// (the core's locale-fallback.ts, where the order is documented and tested):
 // 1. User's saved cookie preference.
 // 2. The Accept-Language header, read here rather than through Astro (which drops
 //    regional tags before matching): each tag by q, full tag, then its language part.
@@ -136,7 +139,7 @@ export const i18nMiddleware: MiddlewareHandler = async (context, next) => {
   // 3. Bypass static files and system paths (with Soft 404 protection)
   if (shouldBypassI18n(pathname)) {
     // .md endpoints: one redirect to the project's `markdownLocale`, no trailing slash
-    // (markdown-path.ts). Without `markdownLocale` they pass through untouched.
+    // (the core's markdown-path.ts). Without `markdownLocale` they pass through untouched.
     const markdownTarget = markdownRedirectTarget(pathname, {
       isLocale: (segment) => LocaleSchema.safeParse(segment).success,
       markdownLocale: I18N_CONFIG.markdownLocale,

@@ -1,0 +1,24 @@
+{
+  // NodeNext: every relative import carries `.ts`, which `rewriteRelativeImportExtensions`
+  // turns into `.js` in dist/ (tsconfig.build.json). No path mapping: the tests run the
+  // sources under plain Node with tsx. `node` before workers-types: both declare `process`,
+  // the first wins, and the CLI needs Node's (`process.exit` returns never).
+  "include": ["src/**/*", "test/**/*"],
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitAny": true,
+    "types": ["node", "@cloudflare/workers-types"]
+  }
+}

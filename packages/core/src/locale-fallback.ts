@@ -5,6 +5,7 @@
  *
  * Order (unchanged from the middleware):
  *   1. the lang cookie, if valid;
+ *   1b. the user's stored preference, when the adapter supplies one (skipped otherwise);
  *   2. the Accept-Language header (the middleware passes the request header): each tag in
  *      `q` order, full tag, then its language part ('es-mx' -> 'es'); the first tag that
  *      names a supported locale wins (accept-language.ts);
@@ -13,10 +14,12 @@
  *   4. the default locale.
  */
 
-import { matchAcceptLanguage } from './accept-language'
+import { matchAcceptLanguage } from './accept-language.ts'
 
 export type FallbackInputs<L extends string> = {
   cookieLocale: () => L | null
+  // A preference stored outside the cookie (an account setting, say). Absent: skipped.
+  userPreference?: () => L | null
   acceptLanguage: () => string | null
   country: () => unknown
 }
@@ -31,6 +34,9 @@ export type FallbackOptions<L extends string> = {
 export function resolveFallbackLocale<L extends string>(inputs: FallbackInputs<L>, options: FallbackOptions<L>): L {
   const cookieLocale = inputs.cookieLocale()
   if (cookieLocale) return cookieLocale
+
+  const preferred = inputs.userPreference?.()
+  if (preferred) return preferred
 
   const browser = matchAcceptLanguage(inputs.acceptLanguage(), options.parseLocale)
   if (browser) return browser

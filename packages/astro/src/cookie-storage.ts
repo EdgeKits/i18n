@@ -1,24 +1,22 @@
 import { type AstroCookies } from 'astro'
+import type { CookieJar } from '@edgekits/i18n-core'
 
-import { I18N_CONFIG } from './config'
+import { i18n } from './instance'
 import { LocaleSchema } from './schema'
 import type { Locale } from './constants'
 import { LANG_COOKIE_NAME } from './constants'
 
-// The lang cookie is a preference, not a secret, and it has two writers: the
-// LanguageSwitcher's client script (`document.cookie`) and the middleware's URL-wins
-// sync. Hence `httpOnly: false`: an httpOnly copy set here could never be overwritten
-// by the switcher again, and a stale value would disable it for good. The server only
-// reads the value through LocaleSchema, never trusts it. `?.`: plain Node (the tests)
-// has no `import.meta.env`.
+// The core's lang-cookie helpers (cookie.ts there: why the cookie is not httpOnly) over
+// Astro's cookies. `?.`: plain Node (the tests) has no `import.meta.env`.
+function jar(cookies: AstroCookies): CookieJar {
+  return {
+    get: (name) => cookies.get(name)?.value,
+    set: (name, value, options) => cookies.set(name, value, options),
+  }
+}
+
 export function setCookieLang(cookies: AstroCookies, locale: Locale) {
-  cookies.set(LANG_COOKIE_NAME, locale, {
-    path: '/',
-    httpOnly: false,
-    secure: import.meta.env?.PROD === true,
-    sameSite: 'lax',
-    maxAge: I18N_CONFIG.cookie.maxAge,
-  })
+  i18n.setCookieLang(jar(cookies), locale, { secure: import.meta.env?.PROD === true })
 }
 
 export type CookieLang = {
@@ -29,19 +27,15 @@ export type CookieLang = {
 }
 
 export function readCookieLang(cookies: AstroCookies): CookieLang {
-  const entry = cookies.get(LANG_COOKIE_NAME)
-  if (!entry) return { present: false, locale: null }
-
-  const result = LocaleSchema.safeParse(entry.value)
-  if (result.success) return { present: true, locale: result.data }
-
-  if (import.meta.env?.PROD !== true) {
-    console.warn(`Invalid cookie "${LANG_COOKIE_NAME}"`, result.error.issues)
-  }
-
-  return { present: true, locale: null }
+  return i18n.readCookieLang(jar(cookies), { onInvalid: warnInvalidCookie })
 }
 
 export function getCookieLang(cookies: AstroCookies): Locale | null {
   return readCookieLang(cookies).locale
+}
+
+function warnInvalidCookie(value: string): void {
+  if (import.meta.env?.PROD !== true) {
+    console.warn(`Invalid cookie "${LANG_COOKIE_NAME}"`, LocaleSchema.safeParse(value).error?.issues)
+  }
 }

@@ -15,14 +15,6 @@ const hasNamespaces = (NAMESPACE_KEYS as readonly string[]).length > 0
 
 export const NamespaceSchema = hasNamespaces ? z.enum(NAMESPACE_KEYS as [string, ...string[]]) : z.string()
 
-type GlobalSchema = I18n.Schema
-
-// Strictly bind the type to the keys of I18n.Schema.
-// If the interface is empty (e.g., on a fresh project clone), fall back to string.
-export type Namespace = keyof GlobalSchema extends never ? string : keyof GlobalSchema
-
-// Added intersection N & keyof GlobalSchema so the compiler
-// doesn't throw an error inside Pick when Namespace falls back to string.
-export type PickSchema<N extends Namespace> = [N] extends [keyof GlobalSchema]
-  ? Pick<GlobalSchema, N & keyof GlobalSchema>
-  : any
+// The keys of I18n.Schema (string on a fresh clone) and the namespaces picked from it:
+// the core's types, which its fetcher is typed by.
+export type { Namespace, PickSchema } from '@edgekits/i18n-core'

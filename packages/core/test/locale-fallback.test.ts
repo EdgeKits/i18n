@@ -80,3 +80,36 @@ test('mapCountryToLocale reads the given table only', () => {
   assert.equal(mapCountryToLocale(null, TABLE), undefined)
   assert.equal(mapCountryToLocale('DE', {}), undefined)
 })
+
+test('1b. userPreference is read after the cookie and before Accept-Language', () => {
+  const read: string[] = []
+  const getters: FallbackInputs<Locale> = {
+    ...inputs({ header: 'de', country: 'AT' }).getters,
+    cookieLocale: () => (read.push('cookie'), null),
+    userPreference: () => (read.push('preference'), 'es'),
+    acceptLanguage: () => (read.push('accept-language'), 'de'),
+  }
+  assert.equal(resolveFallbackLocale(getters, options(TABLE)), 'es')
+  assert.deepEqual(read, ['cookie', 'preference'])
+})
+
+test('1b. a valid cookie wins over userPreference, which is then never read', () => {
+  const read: string[] = []
+  const getters: FallbackInputs<Locale> = {
+    ...inputs({}).getters,
+    cookieLocale: () => (read.push('cookie'), 'de'),
+    userPreference: () => (read.push('preference'), 'es'),
+  }
+  assert.equal(resolveFallbackLocale(getters, options(TABLE)), 'de')
+  assert.deepEqual(read, ['cookie'])
+})
+
+test('1b. without userPreference (absent, or null) the cascade goes on to Accept-Language', () => {
+  const { getters, read } = inputs({ header: 'pt-BR' })
+  assert.equal('userPreference' in getters, false)
+  assert.equal(resolveFallbackLocale(getters, options(TABLE)), 'pt')
+  assert.deepEqual(read, ['cookie', 'accept-language'])
+
+  const withNull: FallbackInputs<Locale> = { ...inputs({ header: 'de' }).getters, userPreference: () => null }
+  assert.equal(resolveFallbackLocale(withNull, options(TABLE)), 'de')
+})

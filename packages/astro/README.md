@@ -174,6 +174,9 @@ its first element, and a locale that has the list replaces it whole.
 npx edgekits-i18n seed
 ```
 
+The `edgekits-i18n` command comes from `@edgekits/i18n-core`, which this package depends on, so
+it is in your project's `node_modules/.bin` with no extra install.
+
 | Command                            | Writes                                                                                                              | Then                                                                                                   |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `edgekits-i18n bundle`             | `i18n-data.json` (the KV payload), `src/i18n.generated.d.ts` (the schema), `<generatedDir>/runtime-constants.ts`    | nothing else                                                                                           |

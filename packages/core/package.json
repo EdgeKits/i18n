@@ -1,0 +1,60 @@
+{
+  "name": "@edgekits/i18n-core",
+  "version": "0.1.8",
+  "description": "The EdgeKits edge-native i18n engine, free of any framework: translations in Workers KV, a per-namespace edge cache invalidated by the Purge API, typed keys, and the edgekits-i18n CLI.",
+  "keywords": [
+    "i18n",
+    "cloudflare",
+    "cloudflare-workers",
+    "kv",
+    "edge"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "author": "Gary Stupak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EdgeKits/astro-i18n.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/EdgeKits/astro-i18n/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/EdgeKits/astro-i18n/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "default": "./dist/format.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "edgekits-i18n": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jiti": "^2.7.0",
+    "jsonc-parser": "^3.3.1"
+  }
+}

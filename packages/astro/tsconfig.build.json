@@ -1,8 +1,8 @@
 {
-  // Emits the Node-side code (config-time entry, integration, CLI) to dist/ with
-  // declarations. Runtime code and components ship as source (ADR-0004).
+  // Emits the Node-side code (config-time entry, integration) to dist/ with declarations.
+  // Runtime code and components ship as source (ADR-0004); the CLI is the core's.
   "extends": "./tsconfig.json",
-  "include": ["src/index.ts", "src/integration/**/*", "src/cli/**/*"],
+  "include": ["src/index.ts", "src/integration/**/*"],
   "compilerOptions": {
     "noEmit": false,
     "declaration": true,
