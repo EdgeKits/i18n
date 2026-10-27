@@ -51,6 +51,20 @@ The instance also carries the locale constants (`DEFAULT_LOCALE`, `SUPPORTED_LOC
 lang-cookie helpers over any `CookieJar`, and the KV key and cache URL builders the CLI shares.
 `routing` in the config is validated here but read by the adapter.
 
+The pure helpers are exported from the root and from `./format` (Node-safe): `fmt`, `plural`,
+`pluralIcu`, `toIetfTag`, and `localizedPath`, the path of a page in a locale for either
+routing mode (a leading locale segment is stripped first; the result ends in a slash):
+
+```ts
+import { localizedPath } from '@edgekits/i18n-core/format'
+
+const options = { routing: 'prefix-except-default', defaultLocale: 'en', isLocale: (s: string) => ['en', 'de'].includes(s) } as const
+
+localizedPath('de', '/about/', options) // '/de/about/'
+localizedPath('en', '/de/about/', options) // '/about/'
+localizedPath('en', '/de/about/', { ...options, routing: 'prefix' }) // '/en/about/'
+```
+
 ## CLI
 
 The `edgekits-i18n` command is this package's. It reads `edgekits-i18n.config.ts` and

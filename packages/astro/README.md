@@ -69,23 +69,24 @@ export default defineI18nConfig({
   keyPrefix: 'example.com',
   // Whether MissingTranslationBanner may render.
   missingTranslationBanner: true,
-  // Every URL starts with its locale (/en/, /de/about/). The only routing there is.
+  // Every URL starts with its locale (/en/, /de/about/). Leave it out for the default,
+  // 'prefix-except-default': the default locale at the root (see Routing modes).
   routing: 'prefix',
 })
 ```
 
-| Field                      | Required | Default      | Meaning                                                                                                                                                                                                |
-| -------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `languages`                | yes      |              | `{ [locale]: { name, countryCode? } }`; `countryCode` is optional: the code your flag component receives                                                                                               |
-| `defaultLocale`            | yes      |              | one of `languages`; its JSON files define the schema                                                                                                                                                   |
-| `cookie`                   | yes      |              | `{ name, maxAge }` (seconds) of the language cookie                                                                                                                                                    |
-| `keyPrefix`                | yes      |              | a hostname of your zone, or a unique name without a dot: KV keys are `<keyPrefix>:<namespace>:<locale>` and every cache URL is `https://<keyPrefix>/…` (see [Deployment targets](#deployment-targets)) |
-| `missingTranslationBanner` | yes      |              | enables `MissingTranslationBanner`                                                                                                                                                                     |
-| `routing`                  | yes      |              | `'prefix'`                                                                                                                                                                                             |
-| `localesDir`               | no       | `'locales'`  | where the CLI reads `<locale>/<namespace>.json`                                                                                                                                                        |
-| `generatedDir`             | no       | `'src/i18n'` | where the CLI writes `runtime-constants.ts` and `fallbacks.generated.ts`                                                                                                                               |
-| `countryToLocale`          | no       | none         | geo-IP step of the locale fallback (see Reference)                                                                                                                                                     |
-| `markdownLocale`           | no       | none         | the locale `.md` endpoints are served in (see Reference)                                                                                                                                               |
+| Field                      | Required | Default                   | Meaning                                                                                                                                                                                                     |
+| -------------------------- | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `languages`                | yes      |                           | `{ [locale]: { name, countryCode? } }`; `countryCode` is optional: the code your flag component receives                                                                                                    |
+| `defaultLocale`            | yes      |                           | one of `languages`; its JSON files define the schema                                                                                                                                                        |
+| `cookie`                   | yes      |                           | `{ name, maxAge }` (seconds) of the language cookie                                                                                                                                                         |
+| `keyPrefix`                | yes      |                           | a hostname of your zone, or a unique name without a dot: KV keys are `<keyPrefix>:<namespace>:<locale>` and every cache URL is `https://<keyPrefix>/…` (see [Deployment targets](#deployment-targets))      |
+| `missingTranslationBanner` | yes      |                           | enables `MissingTranslationBanner`                                                                                                                                                                          |
+| `routing`                  | no       | `'prefix-except-default'` | `'prefix-except-default'`: the default locale at the root (`/about/`), the others prefixed (`/de/about/`); `'prefix'`: every URL starts with its locale (`/en/about/`). See [Routing modes](#routing-modes) |
+| `localesDir`               | no       | `'locales'`               | where the CLI reads `<locale>/<namespace>.json`                                                                                                                                                             |
+| `generatedDir`             | no       | `'src/i18n'`              | where the CLI writes `runtime-constants.ts` and `fallbacks.generated.ts`                                                                                                                                    |
+| `countryToLocale`          | no       | none                      | geo-IP step of the locale fallback (see Reference)                                                                                                                                                          |
+| `markdownLocale`           | no       | none                      | the locale `.md` endpoints are served in (see Reference)                                                                                                                                                    |
 
 Locale codes (the keys of `languages`) are lowercase everywhere: the config, the `locales/`
 folders and the URLs (`pt-br`, not `pt-BR`). `toIetfTag()` from `./format` gives the IETF form
@@ -117,10 +118,10 @@ The integration sets up:
 - a Vite plugin serving the config and your generated files to the runtime as virtual modules;
 - `vite.ssr.noExternal` for the package, whose runtime ships as source;
 - Astro's `i18n` block, when `astro.config` has none: `locales` from `languages`, your
-  `defaultLocale`, `routing: { prefixDefaultLocale: true, redirectToDefaultLocale: false }`.
-  Astro needs it to set `Astro.currentLocale`, which `resolveLocale` reads. If you keep your own
-  block, its `locales` must include every configured locale and its `defaultLocale` must match,
-  or the build stops with a message saying which;
+  `defaultLocale`, `routing: { prefixDefaultLocale: true, redirectToDefaultLocale: false }` in
+  both modes. Astro needs it to set `Astro.currentLocale`, which `resolveLocale` reads. If you
+  keep your own block, its `locales` must include every configured locale, its `defaultLocale`
+  must match, and its `routing` must be that one, or the build stops with a message saying which;
 - the `Locale` type: the union of your locales, for the package's exports;
 - type declarations for its virtual modules, so `tsc` and `astro check` accept the package's
   runtime source in your program;
@@ -136,9 +137,10 @@ The integration sets up:
   export const onRequest = sequence(i18n, yourOwnMiddleware)
   ```
 
-The middleware redirects a URL without a locale (`/`, `/about/`) to a localized one and sets
-`Astro.locals.uiLocale` (the URL's locale) and `Astro.locals.translationLocale` (the locale to
-fetch translations for) on every request.
+In `'prefix'` the middleware redirects a URL without a locale (`/`, `/about/`) to a localized
+one; in `'prefix-except-default'` such a URL is a default-locale page (see
+[Routing modes](#routing-modes)). Either way it sets `Astro.locals.uiLocale` (the URL's locale)
+and `Astro.locals.translationLocale` (the locale to fetch translations for) on every request.
 
 ### 5. Write translations
 
@@ -308,6 +310,56 @@ export default defineI18nConfig({
 
 Use it when your markdown endpoints exist in one locale only. Without it, the package assumes
 nothing about them.
+
+In `'prefix-except-default'` the default locale has no prefix here either: with
+`markdownLocale: 'en'` (the default locale) the canonical form is `/blog/x.md`, and
+`/en/blog/x.md` redirects to it. A `.md` path without a locale segment is served from
+`src/pages/[lang]/` as the default locale's, like any root page.
+
+### Routing modes
+
+`routing` decides where the default locale lives. Pages stay in `src/pages/[lang]/…` in both.
+
+- `'prefix-except-default'` (the default when `routing` is left out): the default locale at the
+  root (`/`, `/about/`), every other locale under its prefix (`/de/about/`). The middleware
+  serves a root URL by rewriting it internally to `/<defaultLocale>/…`, so the URL stays;
+  `/en/about/` redirects permanently to `/about/`. A root URL consults neither Accept-Language
+  nor the country: only a lang cookie for another locale (the visitor chose it in the switcher)
+  redirects, temporarily, to that locale.
+- `'prefix'`: every URL starts with its locale (`/en/about/`); `/` and a URL without a locale
+  redirect to the visitor's locale (cookie, Accept-Language, country, default). Projects that
+  set `routing: 'prefix'` keep exactly this by leaving their config alone.
+
+In `'prefix-except-default'`, build canonical and hreflang URLs from `Astro.originPathname`
+(the URL the visitor requested; `Astro.url` is the rewritten `/<defaultLocale>/…`) through
+`localizedPath` from `/runtime`. Astro's own `astro:i18n` URL helpers prefix the default locale
+here, so `localizedPath` is the one to use:
+
+```astro
+---
+import { DEFAULT_LOCALE, I18N_CONFIG, SUPPORTED_LOCALES, localizedPath, toIetfTag } from '@edgekits/astro-i18n/runtime'
+
+const options = {
+  routing: I18N_CONFIG.routing,
+  defaultLocale: DEFAULT_LOCALE,
+  isLocale: (segment: string) => (SUPPORTED_LOCALES as readonly string[]).includes(segment),
+}
+const path = Astro.originPathname
+---
+
+<link rel="canonical" href={new URL(localizedPath(Astro.locals.uiLocale, path, options), Astro.site)} />
+{SUPPORTED_LOCALES.map((locale) => <link rel="alternate" hreflang={toIetfTag(locale)} href={new URL(localizedPath(locale, path, options), Astro.site)} />)}
+<link rel="alternate" hreflang="x-default" href={new URL(localizedPath(DEFAULT_LOCALE, path, options), Astro.site)} />
+```
+
+Two limits:
+
+- A root path whose first segment equals a locale code is read as that locale: a default-locale
+  page at `/de/` (a content slug `de`) cannot exist next to the German site.
+- A shared HTML cache in front of the site must key root paths on the lang cookie, or skip
+  caching requests that carry one: the same URL renders for a cookie-less visitor and
+  redirects one whose cookie names another locale. Under `'prefix'`, `/en/` is in the same
+  situation: it answers a visitor whose cookie names another locale with a `Set-Cookie`.
 
 ### Styling the components
 

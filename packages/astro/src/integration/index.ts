@@ -1,5 +1,5 @@
 import type { AstroConfig, AstroIntegration } from 'astro'
-import { DEFAULT_GENERATED_DIR, defineI18nConfig, type I18nConfig } from '@edgekits/i18n-core'
+import { DEFAULT_GENERATED_DIR, defineI18nConfig, type I18nConfig, type I18nRouting } from '@edgekits/i18n-core'
 
 import { i18nVitePlugin } from './vite-plugin.ts'
 import { virtualModulesDeclaration } from './virtual-types.ts'
@@ -20,10 +20,8 @@ export const PACKAGE_NAME = '@edgekits/astro-i18n'
  * plugin's virtual modules.
  */
 export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = {}): AstroIntegration {
-  const i18nConfig = defineI18nConfig(config)
+  const i18nConfig = resolveConfig(config)
   const middleware = options.middleware ?? 'auto'
-
-  assertRouting(i18nConfig)
 
   if (!MIDDLEWARE_MODES.includes(middleware)) {
     throw new Error(
@@ -69,17 +67,13 @@ export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = 
 }
 
 /**
- * The core accepts `routing` absent, 'prefix' or 'prefix-except-default'; the middleware
- * implements 'prefix' only so far, so anything else stops at config time.
+ * The validated config with `routing` resolved: absent means 'prefix-except-default', the
+ * mode for new projects. Resolved here, before the Vite plugin serialises it, so the
+ * virtual config (and `I18N_CONFIG`) always carries the mode the middleware runs.
  */
-function assertRouting(config: I18nConfig): void {
-  if (config.routing === 'prefix') return
-
-  throw new Error(
-    config.routing === undefined
-      ? "[@edgekits/astro-i18n] `routing` is required: set `routing: 'prefix'`, the only mode the Astro adapter supports so far."
-      : `[@edgekits/astro-i18n] \`routing\` "${config.routing}" is not supported by the Astro adapter yet; use 'prefix'.`,
-  )
+export function resolveConfig(config: I18nConfig): I18nConfig & { routing: I18nRouting } {
+  const validated = defineI18nConfig(config)
+  return { ...validated, routing: validated.routing ?? 'prefix-except-default' }
 }
 
 // Each entry that exports `I18nLocales`: both re-export the core's interface (root through
@@ -112,9 +106,16 @@ export function localesDeclaration(locales: readonly string[]): string {
 
 /**
  * The Astro `i18n` block set when the project has none: locales and default from the
- * config; every URL locale-prefixed (the middleware redirects `/` itself, so Astro
- * does not). Complete, `fallbackType` included: Astro does not re-validate what
- * `updateConfig` merges, so its schema defaults never fill a partial block.
+ * config; routed as locale-prefixed in both modes (the middleware redirects `/` itself in
+ * 'prefix', so Astro does not). Complete, `fallbackType` included: Astro does not
+ * re-validate what `updateConfig` merges, so its schema defaults never fill a partial block.
+ *
+ * `prefixDefaultLocale: true` in 'prefix-except-default' too: Astro's own i18n check runs
+ * after the middleware, on the rewritten URL (astro/dist/core/routing/handler.js:128-130),
+ * and with `prefixDefaultLocale: false` the strategy `pathname-prefix-other-locales`
+ * answers notFound to any path carrying the default locale (astro/dist/i18n/router.js:
+ * 104-121) — the rewritten `/<default>/about/` is exactly that. With `true` the check
+ * passes and `Astro.currentLocale` works on root pages.
  */
 export function astroI18n(config: I18nConfig): NonNullable<AstroConfig['i18n']> {
   return {
@@ -126,9 +127,10 @@ export function astroI18n(config: I18nConfig): NonNullable<AstroConfig['i18n']> 
 
 /**
  * A project's own Astro `i18n` block must cover every configured locale (as a string
- * entry, a `path` or one of its `codes`) and share the default locale.
+ * entry, a `path` or one of its `codes`), share the default locale, and route as
+ * `astroI18n` does (`prefixDefaultLocale: true`, `redirectToDefaultLocale: false`).
  */
-function assertAstroI18n(block: NonNullable<AstroConfig['i18n']>, config: I18nConfig): void {
+export function assertAstroI18n(block: NonNullable<AstroConfig['i18n']>, config: I18nConfig): void {
   const declared = new Set(
     block.locales.flatMap((entry) => (typeof entry === 'string' ? [entry] : [entry.path, ...entry.codes])),
   )
@@ -144,6 +146,16 @@ function assertAstroI18n(block: NonNullable<AstroConfig['i18n']>, config: I18nCo
     throw new Error(
       `[@edgekits/astro-i18n] Astro \`i18n.defaultLocale\` "${block.defaultLocale}" differs from \`defaultLocale\` "${config.defaultLocale}". ` +
         'Make them equal, or remove the `i18n` block from astro.config and the integration sets it for you.',
+    )
+  }
+  // Absent values are Astro's schema defaults (both false): `redirectToDefaultLocale` left
+  // out is fine, `prefixDefaultLocale` left out is not.
+  const routing = typeof block.routing === 'object' ? block.routing : undefined
+  if (routing?.prefixDefaultLocale !== true || routing.redirectToDefaultLocale === true) {
+    throw new Error(
+      '[@edgekits/astro-i18n] Astro `i18n.routing` must set `prefixDefaultLocale: true` and `redirectToDefaultLocale: false` ' +
+        `(found ${JSON.stringify(block.routing)}): the middleware handles the default locale itself, and Astro's ` +
+        'own check would otherwise answer 404 or redirect the pages it serves. Set them, or remove the `i18n` block from astro.config and the integration sets it for you.',
     )
   }
 }

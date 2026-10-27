@@ -1,6 +1,6 @@
 ---
 import { I18N_CONFIG } from '../config'
-import { SUPPORTED_LOCALES, LANGUAGES, LANG_COOKIE_NAME } from '../constants'
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, LANGUAGES, LANG_COOKIE_NAME } from '../constants'
 import type { Locale } from '../constants'
 
 interface Props {
@@ -24,83 +24,87 @@ interface Props {
 
 const { flag: Flag, triggerIcon: TriggerIcon, activeIcon: ActiveIcon, classes = {}, texts } = Astro.props
 const { uiLocale: currentLang } = Astro.locals
+// One configured locale: nothing to switch to, so nothing renders.
+const hasChoice = SUPPORTED_LOCALES.length > 1
 ---
 
-<language-switcher
-  data-current-lang={currentLang}
-  data-cookie-name={LANG_COOKIE_NAME}
-  data-cookie-max-age={I18N_CONFIG.cookie.maxAge}
-  data-open="false"
->
-  <div class={classes.root}>
-    <button
-      type="button"
-      data-ls-trigger
-      class={classes.trigger}
-      aria-haspopup="true"
-      aria-expanded="false"
-      aria-label={texts?.trigger ?? 'Switch language'}
+{
+  hasChoice && (
+    <language-switcher
+      data-current-lang={currentLang}
+      data-cookie-name={LANG_COOKIE_NAME}
+      data-cookie-max-age={I18N_CONFIG.cookie.maxAge}
+      data-routing={I18N_CONFIG.routing ?? 'prefix-except-default'}
+      data-default-locale={DEFAULT_LOCALE}
+      data-open="false"
     >
-      {
-        TriggerIcon ? (
-          <TriggerIcon class={classes.triggerIcon} stroke-width="1" />
-        ) : (
-          <svg
-            class={classes.triggerIcon}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="9" />
-            <ellipse cx="12" cy="12" rx="4" ry="9" />
-            <path d="M3 12h18" />
-          </svg>
-        )
-      }
-    </button>
-
-    <div data-ls-dropdown class={classes.dropdown} role="menu" hidden>
-      {
-        SUPPORTED_LOCALES.map((lang) => {
-          const locale = lang as Locale
-          const isActive = locale === currentLang
-          const label = LANGUAGES[locale]
-          const flagCode = label.countryCode
-
-          // The label is the language's own name: `lang` lets a screen reader say it in that
-          // language. (A comment here, not among the button's children: there it splits the
-          // whitespace run, and compressHTML keeps two spaces before the label.)
-          return (
-            <button
-              type="button"
-              class:list={[classes.item, isActive && classes.itemActive]}
-              data-ls-item
-              data-lang={locale}
-              data-active={isActive ? 'true' : undefined}
-              role="menuitem"
-              disabled={isActive}
+      <div class={classes.root}>
+        <button
+          type="button"
+          data-ls-trigger
+          class={classes.trigger}
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-label={texts?.trigger ?? 'Switch language'}
+        >
+          {TriggerIcon ? (
+            <TriggerIcon class={classes.triggerIcon} stroke-width="1" />
+          ) : (
+            <svg
+              class={classes.triggerIcon}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1"
+              aria-hidden="true"
             >
-              <span class={classes.itemLabel} lang={locale}>
-                {Flag && flagCode && <Flag code={flagCode} size={16} />}
-                {label.name}
-              </span>
-              {isActive &&
-                (ActiveIcon ? (
-                  <ActiveIcon class={classes.activeIcon} />
-                ) : (
-                  <svg class={classes.activeIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                ))}
-            </button>
-          )
-        })
-      }
-    </div>
-  </div>
-</language-switcher>
+              <circle cx="12" cy="12" r="9" />
+              <ellipse cx="12" cy="12" rx="4" ry="9" />
+              <path d="M3 12h18" />
+            </svg>
+          )}
+        </button>
+
+        <div data-ls-dropdown class={classes.dropdown} role="menu" hidden>
+          {SUPPORTED_LOCALES.map((lang) => {
+            const locale = lang as Locale
+            const isActive = locale === currentLang
+            const label = LANGUAGES[locale]
+            const flagCode = label.countryCode
+
+            // The label is the language's own name: `lang` lets a screen reader say it in that
+            // language. (A comment here, not among the button's children: there it splits the
+            // whitespace run, and compressHTML keeps two spaces before the label.)
+            return (
+              <button
+                type="button"
+                class:list={[classes.item, isActive && classes.itemActive]}
+                data-ls-item
+                data-lang={locale}
+                data-active={isActive ? 'true' : undefined}
+                role="menuitem"
+                disabled={isActive}
+              >
+                <span class={classes.itemLabel} lang={locale}>
+                  {Flag && flagCode && <Flag code={flagCode} size={16} />}
+                  {label.name}
+                </span>
+                {isActive &&
+                  (ActiveIcon ? (
+                    <ActiveIcon class={classes.activeIcon} />
+                  ) : (
+                    <svg class={classes.activeIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  ))}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </language-switcher>
+  )
+}
 
 <script>
   // Config arrives as data attributes on the element: a client script in the engine
@@ -158,19 +162,16 @@ const { uiLocale: currentLang } = Astro.locals
       this.dropdown.hidden ? this.open() : this.close()
     }
 
-    // Isolated logic for getting language from URL
-    private getLangFromUrl(pathname: string): string | undefined {
-      const segments = pathname.split('/')
-      return segments[1] || undefined
-    }
-
-    // Isolated logic for substituting language in URLs
-    private replaceLocaleInPath(pathname: string, currentLang: string, targetLang: string): string {
-      const segments = pathname.split('/')
-      if (segments[1] === currentLang) {
-        segments[1] = targetLang
-      }
-      return segments.join('/')
+    // The core's `localizedPath`, inlined (a client script imports types only): the page's
+    // path in `targetLang`. The URL carries the current locale's prefix exactly when it has
+    // one (every locale in 'prefix', all but the default in 'prefix-except-default'), so
+    // `data-current-lang` is the only segment to strip.
+    private localizedPath(pathname: string, targetLang: string): string {
+      const { currentLang, routing, defaultLocale } = this.dataset
+      const segments = pathname.split('/').filter(Boolean)
+      if (segments[0] === currentLang) segments.shift()
+      const rest = segments.length > 0 ? `${segments.join('/')}/` : ''
+      return routing !== 'prefix' && targetLang === defaultLocale ? `/${rest}` : `/${targetLang}/${rest}`
     }
 
     private onSelect = (event: Event) => {
@@ -181,11 +182,6 @@ const { uiLocale: currentLang } = Astro.locals
       const lang = button.dataset.lang as Locale | undefined
       if (!lang) return
 
-      const pathname = window.location.pathname
-      const currentLang = this.getLangFromUrl(pathname)
-
-      if (!currentLang) return
-
       const { cookieName, cookieMaxAge } = this.dataset
 
       // Persist the EXPLICIT language choice client-side. The i18n middleware
@@ -195,7 +191,7 @@ const { uiLocale: currentLang } = Astro.locals
       // either side (cookie-storage.ts): the server validates it, never trusts it.
       document.cookie = `${cookieName}=${lang}; path=/; max-age=${cookieMaxAge}; SameSite=Lax; Secure`
 
-      window.location.href = this.replaceLocaleInPath(pathname, currentLang, lang)
+      window.location.href = this.localizedPath(window.location.pathname, lang)
     }
 
     private onDocumentClick = (event: MouseEvent) => {

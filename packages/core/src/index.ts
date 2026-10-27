@@ -26,10 +26,12 @@ export type { Bindings, EdgeCache, FetcherInputs, TranslationsKv } from './fetch
 export {
   fmt,
   getLangFromUrl,
+  localizedPath,
   plural,
   pluralIcu,
   replaceLocaleInPath,
   toIetfTag,
+  type LocalizedPathOptions,
   type PluralCategory,
   type PluralPatterns,
 } from './format.ts'

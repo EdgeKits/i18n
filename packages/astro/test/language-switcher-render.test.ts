@@ -17,11 +17,12 @@ const ROOT = path.resolve(import.meta.dirname, '..')
 async function renderSwitcher(
   props: Record<string, unknown> = {},
   astroConfig: { compressHTML?: boolean } = {},
+  configFile = 'switcher.config.ts',
 ): Promise<string> {
   const configFn = getViteConfig(
     {
       resolve: {
-        alias: { 'virtual:@edgekits/astro-i18n/config': path.join(ROOT, 'test/fixtures/switcher.config.ts') },
+        alias: { 'virtual:@edgekits/astro-i18n/config': path.join(ROOT, 'test/fixtures', configFile) },
       },
       server: { middlewareMode: true, hmr: false, ws: false },
       logLevel: 'silent',
@@ -79,4 +80,22 @@ test('LanguageSwitcher: under compressHTML an item opens with at most one space 
   const items = [...html.matchAll(/<button[^>]*data-ls-item[^>]*>(\s*)<span/g)]
   assert.equal(items.length, 2, 'both fixture locales render')
   for (const [open, gap] of items) assert.ok(gap!.length <= 1, JSON.stringify(open))
+})
+
+const openingTag = (html: string) => /<language-switcher[^>]*>/.exec(html)?.[0]
+
+test('LanguageSwitcher: the element carries the routing mode and the default locale for its script', async () => {
+  assert.equal(
+    openingTag(await renderSwitcher()),
+    '<language-switcher data-current-lang="en" data-cookie-name="lang" data-cookie-max-age="60" data-routing="prefix" data-default-locale="en" data-open="false">',
+  )
+  assert.match(
+    openingTag(await renderSwitcher({}, {}, 'switcher-root.config.ts')) ?? '',
+    / data-routing="prefix-except-default" data-default-locale="en" /,
+  )
+})
+
+test('LanguageSwitcher: one configured locale renders nothing', async () => {
+  const html = await renderSwitcher({}, {}, 'switcher-single.config.ts')
+  assert.doesNotMatch(html, /<language-switcher|data-ls-/)
 })

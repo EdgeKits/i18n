@@ -1,13 +1,15 @@
-import type { MiddlewareHandler } from 'astro'
+import type { AstroCookies, MiddlewareHandler } from 'astro'
 import {
+  localizedPath,
   MARKDOWN_PATH,
   markdownRedirectTarget,
   resolveFallbackLocale as resolveFallbackFrom,
+  type I18nRouting,
 } from '@edgekits/i18n-core'
 import { LocaleSchema } from '../schema'
 import { I18N_CONFIG } from '../config'
 import { DEFAULT_LOCALE, type Locale } from '../constants'
-import { getCookieLang, readCookieLang, setCookieLang } from '../cookie-storage'
+import { readCookieLang, setCookieLang, type CookieLang } from '../cookie-storage'
 import { resolveLocaleForTranslations } from '../resolve-locale'
 
 // Regex to identify public static assets (images, fonts, scripts, etc.)
@@ -38,14 +40,32 @@ const IGNORED_PREFIXES = [
 // Extracts the context type from Astro's MiddlewareHandler for cleaner function signatures.
 type I18nMiddlewareContext = Parameters<MiddlewareHandler>[0]
 
+/**
+ * What the middleware reads: the resolved routing mode, the locale settings and the lang
+ * cookie over Astro's cookies. `i18nMiddleware` below is built from the project's config
+ * and instance; tests build one for either mode or a single locale.
+ */
+export type I18nMiddlewareDeps = {
+  routing: I18nRouting
+  defaultLocale: Locale
+  markdownLocale: string | undefined
+  countryToLocale: Record<string, string> | undefined
+  // The locale when the value is a supported one, otherwise null.
+  parseLocale: (value: unknown) => Locale | null
+  resolveLocaleForTranslations: (locale: Locale) => Locale
+  readCookieLang: (cookies: AstroCookies) => CookieLang
+  setCookieLang: (cookies: AstroCookies, locale: Locale) => void
+}
+
 // Two kinds of redirect, by whether the target depends on the visitor.
 //
 // Deterministic normalisations (a missing trailing slash, a `.md` path moved to
-// `markdownLocale`) always lead to the same URL, so they are permanent in production:
-// 301 consolidates canonical signals in Google. They use REDIRECT_STATUS: 302 under
-// `astro dev` (`import.meta.env.DEV`) so nothing gets cached while testing, 301 in any
-// production build (incl. `astro preview` / `wrangler dev`). `?.`: plain Node (the tests)
-// has no `import.meta.env`, which counts as production.
+// `markdownLocale`, the default locale's prefix dropped in 'prefix-except-default') always
+// lead to the same URL, so they are permanent in production: 301 consolidates canonical
+// signals in Google. They use REDIRECT_STATUS: 302 under `astro dev`
+// (`import.meta.env.DEV`) so nothing gets cached while testing, 301 in any production build
+// (incl. `astro preview` / `wrangler dev`). `?.`: plain Node (the tests) has no
+// `import.meta.env`, which counts as production.
 //
 // Negotiated redirects (no locale or an invalid one in the URL: the target comes from the
 // visitor's cookie, Accept-Language or country) are always temporary and uncacheable, in
@@ -56,14 +76,15 @@ const REDIRECT_STATUS = import.meta.env?.DEV ? 302 : 301
 
 // A redirect whose target depends on the visitor: temporary, never stored by a shared
 // cache, and keyed on the request headers that chose it (the country is not a request
-// header, hence `no-store` rather than relying on Vary alone).
-function negotiatedRedirect(target: string): Response {
+// header, hence `no-store` rather than relying on Vary alone). `vary` names only the
+// headers that were consulted: the root of 'prefix-except-default' reads the cookie alone.
+function negotiatedRedirect(target: string, vary = 'Cookie, Accept-Language'): Response {
   return new Response(null, {
     status: 302,
     headers: {
       Location: target,
       'Cache-Control': 'private, no-store',
-      Vary: 'Cookie, Accept-Language',
+      Vary: vary,
     },
   })
 }
@@ -85,106 +106,56 @@ function buildLocalizedPath(locale: Locale, rest: string[]): string {
   return suffix ? `/${locale}/${suffix}/` : `/${locale}/`
 }
 
-// Resolves the most appropriate locale for the user based on a fallback cascade
-// (the core's locale-fallback.ts, where the order is documented and tested):
-// 1. User's saved cookie preference.
-// 2. The Accept-Language header, read here rather than through Astro (which drops
-//    regional tags before matching): each tag by q, full tag, then its language part.
-// 3. Only when no tag matched: the Cloudflare Geo-IP country, through the project's
-//    `countryToLocale` table (skipped when the config has none).
-// 4. Finally, falls back to the application's DEFAULT_LOCALE.
-function resolveFallbackLocale(context: I18nMiddlewareContext): Locale {
-  return resolveFallbackFrom<Locale>(
-    {
-      cookieLocale: () => getCookieLang(context.cookies),
-      acceptLanguage: () => context.request.headers.get('accept-language'),
-      // cf is undefined in local dev unless simulated
-      country: () => context.request?.cf?.country,
-    },
-    {
-      parseLocale: (value) => {
-        const parsed = LocaleSchema.safeParse(value)
-        return parsed.success ? parsed.data : null
+/** The i18n middleware for one set of deps (one routing mode, one locale list). */
+export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandler {
+  const isLocale = (segment: string) => deps.parseLocale(segment) !== null
+  const pathOptions = { routing: deps.routing, defaultLocale: deps.defaultLocale, isLocale }
+
+  // Resolves the most appropriate locale for the user based on a fallback cascade
+  // (the core's locale-fallback.ts, where the order is documented and tested):
+  // 1. User's saved cookie preference.
+  // 2. The Accept-Language header, read here rather than through Astro (which drops
+  //    regional tags before matching): each tag by q, full tag, then its language part.
+  // 3. Only when no tag matched: the Cloudflare Geo-IP country, through the project's
+  //    `countryToLocale` table (skipped when the config has none).
+  // 4. Finally, falls back to the application's default locale.
+  function resolveFallbackLocale(context: I18nMiddlewareContext): Locale {
+    return resolveFallbackFrom<Locale>(
+      {
+        cookieLocale: () => deps.readCookieLang(context.cookies).locale,
+        acceptLanguage: () => context.request.headers.get('accept-language'),
+        // cf is undefined in local dev unless simulated
+        country: () => context.request?.cf?.country,
       },
-      defaultLocale: DEFAULT_LOCALE,
-      countryToLocale: I18N_CONFIG.countryToLocale,
-    },
-  )
-}
-
-// Main i18n middleware handler. Intercepts incoming requests, manages routing,
-// sets locale context, and handles soft 404 protections for edge environments.
-export const i18nMiddleware: MiddlewareHandler = async (context, next) => {
-  const url = new URL(context.request.url)
-  const pathname = url.pathname
-
-  // 1. Split the URL early to access its segments
-  const segments = pathname.split('/').filter(Boolean) // "/es/about/" -> ["es", "about"]
-  const firstSegment = segments[0] ?? null
-
-  // 2. SAFETY NET (For static file 404 pages)
-  // Attempt to infer the locale from the URL, or fallback to the default.
-  let safeLocale = DEFAULT_LOCALE
-  if (firstSegment) {
-    const parsed = LocaleSchema.safeParse(firstSegment)
-    if (parsed.success) {
-      safeLocale = parsed.data
-    }
+      {
+        parseLocale: deps.parseLocale,
+        defaultLocale: deps.defaultLocale,
+        countryToLocale: deps.countryToLocale,
+      },
+    )
   }
 
-  // Inject the locale into the context BEFORE the bypass check!
-  context.locals.uiLocale = safeLocale
-  context.locals.translationLocale = resolveLocaleForTranslations(safeLocale)
+  // The `.md` redirect target, or null. 'prefix': the core's markdown-path.ts as is.
+  // 'prefix-except-default': the same target without the default locale's prefix (through
+  // localizedPath, minus the trailing slash a `.md` path never has); a path already at
+  // `/<default>/…` is redirected too, since that is no longer canonical.
+  function markdownTarget(pathname: string): string | null {
+    const target = markdownRedirectTarget(pathname, { isLocale, markdownLocale: deps.markdownLocale })
+    if (deps.routing === 'prefix') return target
+    if (!deps.markdownLocale || !MARKDOWN_PATH.test(pathname)) return null
 
-  // 3. Bypass static files and system paths (with Soft 404 protection)
-  if (shouldBypassI18n(pathname)) {
-    // .md endpoints: one redirect to the project's `markdownLocale`, no trailing slash
-    // (the core's markdown-path.ts). Without `markdownLocale` they pass through untouched.
-    const markdownTarget = markdownRedirectTarget(pathname, {
-      isLocale: (segment) => LocaleSchema.safeParse(segment).success,
-      markdownLocale: I18N_CONFIG.markdownLocale,
-    })
-    if (markdownTarget) {
-      return context.redirect(markdownTarget, REDIRECT_STATUS)
-    }
-
-    const response = await next()
-
-    const contentType = response.headers.get('content-type') || ''
-    const isHtml = contentType.includes('text/html')
-    const isRedirect = response.status >= 300 && response.status < 400
-
-    // If Astro attempts to return HTML for a static/API request (and it's not a redirect),
-    // it means the file wasn't found and Astro rendered a fallback page (404.astro or catch-all).
-    // We strictly intercept this and return a lightweight text-based 404 instead.
-    // Why? To mitigate Directory Bruteforcing / Fuzzing attacks and save resources.
-    if (isHtml && !isRedirect) {
-      // Aggressively save Worker CPU cycles for missing static files
-      return new Response('Not found', {
-        status: 404,
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-      })
-    }
-
-    return response
+    const localized = localizedPath(deps.markdownLocale, target ?? pathname, pathOptions).slice(0, -1)
+    return localized === pathname ? null : localized
   }
 
-  const fallbackLocale = resolveFallbackLocale(context)
-
-  // 1. No locale in URL — redirect to fallback locale root
-  if (!firstSegment) {
-    const target = buildLocalizedPath(fallbackLocale, [])
-    if (pathname !== target) {
-      return negotiatedRedirect(target)
-    }
-    return await next()
-  }
-
-  // 2. URL has first segment — validate as locale
-  const parsed = LocaleSchema.safeParse(firstSegment)
-  const urlLocale: Locale | null = parsed.success ? parsed.data : null
-
-  if (urlLocale) {
+  // A URL that carries a valid locale: cookie sync, locals, trailing-slash normalisation.
+  async function serveLocalized(
+    context: I18nMiddlewareContext,
+    next: Parameters<MiddlewareHandler>[1],
+    urlLocale: Locale,
+    segments: string[],
+  ): Promise<Response> {
+    const pathname = new URL(context.request.url).pathname
     // Keep the lang cookie in sync with the URL locale — but ONLY update an
     // EXISTING cookie that differs or does not parse. Rationale (HTML edge cache, P1/P2):
     //   - The old unconditional set emitted `Set-Cookie` on EVERY localized
@@ -199,14 +170,14 @@ export const i18nMiddleware: MiddlewareHandler = async (context, next) => {
     //   - A cookie that is present but invalid (a foreign value from another site
     //     on the same host, a locale this site does not have) is corrected to the
     //     URL locale too, so a stale value never outlives the next request.
-    const cookie = readCookieLang(context.cookies)
+    const cookie = deps.readCookieLang(context.cookies)
     if (cookie.present && cookie.locale !== urlLocale) {
-      setCookieLang(context.cookies, urlLocale)
+      deps.setCookieLang(context.cookies, urlLocale)
     }
     // Set uiLocale to Astro locals
     context.locals.uiLocale = urlLocale
     // Define and set translationLocale to Astro locals
-    const translationLocale = resolveLocaleForTranslations(urlLocale)
+    const translationLocale = deps.resolveLocaleForTranslations(urlLocale)
     context.locals.translationLocale = translationLocale
 
     // Normalize trailing slash and structure
@@ -218,12 +189,156 @@ export const i18nMiddleware: MiddlewareHandler = async (context, next) => {
     return await next()
   }
 
-  // 3. Invalid locale in URL -> treat the whole path as content missing the locale prefix.
-  const target = buildLocalizedPath(fallbackLocale, segments)
+  // 'prefix-except-default': the default locale at the root, the others under their prefix.
+  async function serveExceptDefault(
+    context: I18nMiddlewareContext,
+    next: Parameters<MiddlewareHandler>[1],
+    segments: string[],
+    firstSegment: string | null,
+  ): Promise<Response> {
+    const pathname = new URL(context.request.url).pathname
+    const urlLocale = firstSegment ? deps.parseLocale(firstSegment) : null
 
-  if (pathname !== target) {
-    return negotiatedRedirect(target)
+    // The default locale's prefix is not canonical: one permanent hop to the path without it.
+    if (urlLocale === deps.defaultLocale) {
+      return context.redirect(localizedPath(deps.defaultLocale, pathname, pathOptions), REDIRECT_STATUS)
+    }
+
+    if (urlLocale) {
+      return await serveLocalized(context, next, urlLocale, segments)
+    }
+
+    // A default-locale page (the root included). The URL names its language, so neither
+    // Accept-Language nor the country is consulted; only a saved choice of another locale
+    // leads away from it.
+    context.locals.uiLocale = deps.defaultLocale
+    context.locals.translationLocale = deps.resolveLocaleForTranslations(deps.defaultLocale)
+
+    const cookie = deps.readCookieLang(context.cookies)
+    if (cookie.present && cookie.locale !== deps.defaultLocale) {
+      if (cookie.locale) {
+        return negotiatedRedirect(localizedPath(cookie.locale, pathname, pathOptions), 'Cookie')
+      }
+      // Present but invalid: corrected to the URL's locale, as serveLocalized does.
+      deps.setCookieLang(context.cookies, deps.defaultLocale)
+    }
+
+    const normalized = localizedPath(deps.defaultLocale, pathname, pathOptions)
+    if (pathname !== normalized) {
+      return context.redirect(normalized, REDIRECT_STATUS)
+    }
+
+    // The project's pages live under `src/pages/[lang]/`: render `/<default>/…` while the
+    // URL stays. `next(path)` rewrites without running the middleware again
+    // (astro/dist/core/middleware/astro-middleware.js:33-40) and keeps `locals`;
+    // `context.rewrite()` would re-run it (astro/dist/core/rewrites/handler.js:67-71).
+    return await next(`/${deps.defaultLocale}${pathname}`)
   }
 
-  return await next()
+  // Main i18n middleware handler. Intercepts incoming requests, manages routing,
+  // sets locale context, and handles soft 404 protections for edge environments.
+  return async (context, next) => {
+    const url = new URL(context.request.url)
+    const pathname = url.pathname
+
+    // 1. Split the URL early to access its segments
+    const segments = pathname.split('/').filter(Boolean) // "/es/about/" -> ["es", "about"]
+    const firstSegment = segments[0] ?? null
+
+    // 2. SAFETY NET (For static file 404 pages)
+    // Attempt to infer the locale from the URL, or fallback to the default.
+    let safeLocale = deps.defaultLocale
+    if (firstSegment) {
+      const parsed = deps.parseLocale(firstSegment)
+      if (parsed !== null) {
+        safeLocale = parsed
+      }
+    }
+
+    // Inject the locale into the context BEFORE the bypass check!
+    context.locals.uiLocale = safeLocale
+    context.locals.translationLocale = deps.resolveLocaleForTranslations(safeLocale)
+
+    // 3. Bypass static files and system paths (with Soft 404 protection)
+    if (shouldBypassI18n(pathname)) {
+      // .md endpoints: one redirect to the project's `markdownLocale`, no trailing slash
+      // (the core's markdown-path.ts). Without `markdownLocale` they pass through untouched.
+      const target = markdownTarget(pathname)
+      if (target) {
+        return context.redirect(target, REDIRECT_STATUS)
+      }
+
+      // 'prefix-except-default': a `.md` path without a locale segment belongs to the
+      // default locale, whose endpoint lives under `[lang]`.
+      const rootMarkdown =
+        deps.routing !== 'prefix' && MARKDOWN_PATH.test(pathname) && (!firstSegment || !isLocale(firstSegment))
+      const response = rootMarkdown ? await next(`/${deps.defaultLocale}${pathname}`) : await next()
+
+      const contentType = response.headers.get('content-type') || ''
+      const isHtml = contentType.includes('text/html')
+      const isRedirect = response.status >= 300 && response.status < 400
+
+      // If Astro attempts to return HTML for a static/API request (and it's not a redirect),
+      // it means the file wasn't found and Astro rendered a fallback page (404.astro or catch-all).
+      // We strictly intercept this and return a lightweight text-based 404 instead.
+      // Why? To mitigate Directory Bruteforcing / Fuzzing attacks and save resources.
+      if (isHtml && !isRedirect) {
+        // Aggressively save Worker CPU cycles for missing static files
+        return new Response('Not found', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        })
+      }
+
+      return response
+    }
+
+    if (deps.routing !== 'prefix') {
+      return await serveExceptDefault(context, next, segments, firstSegment)
+    }
+
+    const fallbackLocale = resolveFallbackLocale(context)
+
+    // 1. No locale in URL — redirect to fallback locale root
+    if (!firstSegment) {
+      const target = buildLocalizedPath(fallbackLocale, [])
+      if (pathname !== target) {
+        return negotiatedRedirect(target)
+      }
+      return await next()
+    }
+
+    // 2. URL has first segment — validate as locale
+    const urlLocale = deps.parseLocale(firstSegment)
+
+    if (urlLocale) {
+      return await serveLocalized(context, next, urlLocale, segments)
+    }
+
+    // 3. Invalid locale in URL -> treat the whole path as content missing the locale prefix.
+    const target = buildLocalizedPath(fallbackLocale, segments)
+
+    if (pathname !== target) {
+      return negotiatedRedirect(target)
+    }
+
+    return await next()
+  }
 }
+
+/** The project's middleware: its resolved config and its engine instance. */
+export const i18nMiddleware: MiddlewareHandler = createI18nMiddleware({
+  // The integration resolves an absent `routing` before serialising the config; the
+  // fallback covers a config that reached the virtual module some other way.
+  routing: I18N_CONFIG.routing ?? 'prefix-except-default',
+  defaultLocale: DEFAULT_LOCALE,
+  markdownLocale: I18N_CONFIG.markdownLocale,
+  countryToLocale: I18N_CONFIG.countryToLocale,
+  parseLocale: (value) => {
+    const parsed = LocaleSchema.safeParse(value)
+    return parsed.success ? parsed.data : null
+  },
+  resolveLocaleForTranslations,
+  readCookieLang,
+  setCookieLang,
+})

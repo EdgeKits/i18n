@@ -24,6 +24,7 @@ const PINNED_VALUE_EXPORTS = [
   'fetchTranslations',
   'fmt',
   'getLangFromUrl',
+  'localizedPath',
   'plural',
   'pluralIcu',
   'replaceLocaleInPath',

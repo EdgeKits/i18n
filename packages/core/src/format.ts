@@ -1,3 +1,5 @@
+import type { I18nRouting } from './types.ts'
+
 // Sanitizer: Turns <script> into &lt;script&gt;
 function escapeHtml(unsafe: string | number): string {
   return String(unsafe)
@@ -84,13 +86,39 @@ export function pluralIcu(count: number, locale: string, patterns: PluralPattern
   return fmt(template, { count })
 }
 
-// Used in the LanguageSwitcher and SeoHreflangs components
+export type LocalizedPathOptions = {
+  // Absent means 'prefix-except-default', the mode a config without `routing` gets.
+  routing: I18nRouting | undefined
+  defaultLocale: string
+  isLocale: (segment: string) => boolean
+}
+
+/**
+ * The path of a page in `locale`, for either routing mode, always with a trailing slash.
+ * A leading locale segment is stripped first, so a prefixed `/de/about/`, a rewritten
+ * `/en/about/` and a bare `/about/` all name the same page. 'prefix': `/<locale>/<rest>/`.
+ * 'prefix-except-default': the same, except `/<rest>/` (`/` for the root) for the default
+ * locale.
+ */
+export function localizedPath(locale: string, pathname: string, options: LocalizedPathOptions): string {
+  const segments = pathname.split('/').filter(Boolean)
+  if (segments.length > 0 && options.isLocale(segments[0]!)) segments.shift()
+
+  const rest = segments.length > 0 ? `${segments.join('/')}/` : ''
+  const unprefixed = options.routing !== 'prefix' && locale === options.defaultLocale
+  return unprefixed ? `/${rest}` : `/${locale}/${rest}`
+}
+
+// Used in the LanguageSwitcher and SeoHreflangs components. Prefix-only by construction:
+// a path without a locale prefix (the default locale in 'prefix-except-default') comes
+// back unchanged; `localizedPath` covers both modes.
 export function replaceLocaleInPath(currentPath: string, currentLocale: string, newLocale: string): string {
   const prefixRegex = new RegExp(`^/${currentLocale}/`)
   return currentPath.replace(prefixRegex, `/${newLocale}/`)
 }
 
-// Used in the LanguageSwitcher component
+// Used in the LanguageSwitcher component. Prefix-only by construction: the first segment,
+// which in 'prefix-except-default' is a content segment on a default-locale page.
 export function getLangFromUrl(pathname: string) {
   // Remove leading/trailing slashes: '/en/about/' -> 'en/about'
   const cleaned = pathname.replace(/^\/+|\/+$/g, '')

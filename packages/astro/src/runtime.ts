@@ -2,8 +2,8 @@
 // import. Ships as source and runs through the project's Vite, next to the virtual
 // modules the integration serves.
 export { fetchTranslations } from './fetcher'
-export { fmt, plural, pluralIcu, toIetfTag, replaceLocaleInPath, getLangFromUrl } from './format'
-export type { PluralCategory, PluralPatterns } from './format'
+export { fmt, plural, pluralIcu, toIetfTag, replaceLocaleInPath, getLangFromUrl, localizedPath } from './format'
+export type { LocalizedPathOptions, PluralCategory, PluralPatterns } from './format'
 export { I18N_CONFIG } from './config'
 export {
   DEFAULT_LOCALE,
