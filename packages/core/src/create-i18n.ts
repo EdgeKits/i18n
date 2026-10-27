@@ -103,7 +103,7 @@ export function createI18n<const C extends I18nConfig>(
     buildTranslationCacheRequest,
   })
 
-  const { LOCALES_WITH_TRANSLATIONS, FULLY_TRANSLATED_LOCALES } = generated.runtimeConstants
+  const { NAMESPACE_KEYS, LOCALES_WITH_TRANSLATIONS, FULLY_TRANSLATED_LOCALES } = generated.runtimeConstants
 
   /**
    * Translation locale: what is actually loaded from KV. Falls back to the default
@@ -152,6 +152,8 @@ export function createI18n<const C extends I18nConfig>(
     LANGUAGES,
     LANG_COOKIE_NAME,
     ENABLE_MISSING_TRANSLATION_BANNER,
+    // The generated namespaces: what an adapter checks a namespace list from a client against.
+    NAMESPACE_KEYS,
     isLocale,
     parseLocale,
     fetchTranslations,

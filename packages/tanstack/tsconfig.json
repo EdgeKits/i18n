@@ -1,0 +1,24 @@
+{
+  // NodeNext like the core: every relative import carries `.ts`/`.tsx`, which
+  // `rewriteRelativeImportExtensions` turns into `.js` in dist/ (tsconfig.build.json). The
+  // tests run the sources under plain Node with tsx. The default lib (DOM) types the
+  // switcher's `document`; no workers types: the package reads no binding itself.
+  "include": ["src/**/*", "test/**/*"],
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "jsx": "react-jsx",
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitAny": true,
+    "types": ["node"]
+  }
+}

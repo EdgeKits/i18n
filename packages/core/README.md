@@ -46,7 +46,7 @@ export const i18n = createI18n(
 const { common } = await i18n.fetchTranslations('de', ['common'])
 ```
 
-The instance also carries the locale constants (`DEFAULT_LOCALE`, `SUPPORTED_LOCALES`,
+The instance also carries the locale constants (`DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `NAMESPACE_KEYS`,
 `LANGUAGES`), `isLocale`/`parseLocale`, the fallback cascade (`resolveFallbackLocale`), the
 lang-cookie helpers over any `CookieJar`, and the KV key and cache URL builders the CLI shares.
 `routing` in the config is validated here but read by the adapter.

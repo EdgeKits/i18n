@@ -1,0 +1,11 @@
+{
+  // Emits the package to dist/ with declarations: the server entry and `./react`.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*"],
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  }
+}

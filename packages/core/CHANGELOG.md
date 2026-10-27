@@ -7,3 +7,5 @@ All notable changes to this package are documented here. The format follows
 ## Unreleased
 
 - Extracted from `@edgekits/astro-i18n` 0.1.8.
+- The instance carries the generated `NAMESPACE_KEYS` (for `@edgekits/tanstack-i18n`'s
+  `isNamespaceList`).
