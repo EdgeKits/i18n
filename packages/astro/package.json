@@ -1,0 +1,80 @@
+{
+  "name": "@edgekits/astro-i18n",
+  "version": "0.1.8",
+  "description": "Edge-native i18n for Astro on Cloudflare Workers: translations in Workers KV, a per-namespace edge cache invalidated by the Purge API, and typed keys.",
+  "keywords": [
+    "astro",
+    "astro-integration",
+    "i18n",
+    "cloudflare",
+    "cloudflare-workers",
+    "kv",
+    "edge"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "author": "Gary Stupak",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EdgeKits/astro-i18n.git"
+  },
+  "homepage": "https://github.com/EdgeKits/astro-i18n#readme",
+  "bugs": {
+    "url": "https://github.com/EdgeKits/astro-i18n/issues"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./config": "./src/config.entry.ts",
+    "./format": "./src/format.ts",
+    "./runtime": "./src/runtime.ts",
+    "./middleware": "./src/middleware.ts",
+    "./components/*": "./src/components/*.astro",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "edgekits-i18n": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
+    "test": "node --import ./test/register.mjs --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "jiti": "^2.7.0",
+    "jsonc-parser": "^3.3.1"
+  },
+  "peerDependencies": {
+    "@astrojs/cloudflare": "^14.3.0",
+    "astro": "^7.3.0",
+    "wrangler": "^4.125.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261011.1",
+    "@types/node": "^25.9.1",
+    "astro": "^7.3.8",
+    "prettier": "3.9.4",
+    "prettier-plugin-astro": "0.14.1",
+    "prettier-plugin-tailwindcss": "0.8.0",
+    "tsx": "^4.23.12",
+    "typescript": "~5.9.3"
+  }
+}

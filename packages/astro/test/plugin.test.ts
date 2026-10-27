@@ -4,12 +4,13 @@ import path from 'node:path'
 import test from 'node:test'
 
 /**
- * The astro-i18n plugin (plugins/astro-i18n), listed by the EdgeKits skills marketplace
- * from this repository. Its version tracks the package's, so a release bumps both.
+ * The astro-i18n plugin (plugins/astro-i18n at the repository root), listed by the EdgeKits
+ * skills marketplace from this repository. Its version tracks the package's, so a release
+ * bumps both.
  */
 
 const ROOT = path.resolve(import.meta.dirname, '..')
-const PLUGIN_DIR = path.join(ROOT, 'plugins', 'astro-i18n')
+const PLUGIN_DIR = path.join(ROOT, '..', '..', 'plugins', 'astro-i18n')
 const SKILL_DIR = path.join(PLUGIN_DIR, 'skills', 'astro-i18n')
 
 const FILES = [
