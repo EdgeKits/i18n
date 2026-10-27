@@ -606,11 +606,17 @@ The skill asks before it writes any code, and waits for the answers:
 | Should a visitor's country pick the locale when nothing else does? How?      | `DE`, `AT`, `CH` → `de`; `BR` → `pt-br`       |
 | Middleware: registered by the integration (`auto`), or in your own sequence? | `auto`                                        |
 | Flags in the language switcher?                                              | Yes: `en` → `us`, `de` → `de`, `pt-br` → `br` |
+| Routing: the default locale at the root, or every locale prefixed?           | At the root                                   |
 
 For flags, a regional locale takes its region (`pt-br` → `br`, `en-gb` → `gb`), and for a
 language-only locale the skill proposes the obvious country (`en` → `us`) for you to confirm. It
 shows the full list back before it writes the config. If you have no preference on any of
 these, it uses the defaults: no geo table, no markdown locale, `auto` middleware, flags on.
+
+For routing, the default locale at the root (`/`, `/about/`; other locales prefixed) is
+`routing: 'prefix-except-default'`, the default; every locale prefixed (`/en/about/`) is
+`routing: 'prefix'`. The skill asks only with two or more locales; with one, the root mode is
+the only sensible one and needs no question.
 
 #### What it creates
 
@@ -626,6 +632,8 @@ these, it uses the defaults: no geo table, no markdown locale, `auto` middleware
   where they are.
 - `src/components/Flag.astro` and one SVG per flag in `public/flags/`, if you chose flags (the
   recipe is below).
+- The language switcher and the hreflang tags work in both routing modes: the hreflang
+  component builds its URLs with `localizedPath`, which knows the mode.
 - A KV namespace on your Cloudflare account (`wrangler kv namespace create`). The skill asks
   before it runs that command. Until then, local development works with a placeholder id of 32
   hexadecimal characters, such as `00000000000000000000000000000000`: the CLI checks the id's

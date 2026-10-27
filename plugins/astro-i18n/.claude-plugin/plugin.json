@@ -2,7 +2,7 @@
   "name": "astro-i18n",
   "version": "0.1.8",
   "displayName": "Astro i18n (EdgeKits)",
-  "description": "Adds edge-native i18n to an Astro site on Cloudflare Workers with @edgekits/astro-i18n, and localizes its forms and SEO the EdgeKits way.",
+  "description": "Adds edge-native i18n to an Astro site on Cloudflare Workers with @edgekits/astro-i18n, and localizes its forms and SEO the EdgeKits way; and `@edgekits/tanstack-i18n` in TanStack Start apps.",
   "author": {
     "name": "EdgeKits",
     "url": "https://edgekits.dev"

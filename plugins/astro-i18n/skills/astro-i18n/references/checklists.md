@@ -33,11 +33,17 @@ package is installed; `npx edgekits-i18n --help` lists the CLI.
 - [ ] `npx wrangler types` after any `wrangler.jsonc` / `.dev.vars` change.
 - [ ] `npx astro check` passes; `tsc --noEmit` too if the project runs it.
 - [ ] `npx astro dev`, then:
-  - [ ] `/` redirects to `/<locale>/` (cookie, then `Accept-Language`, then geo, then default);
-  - [ ] `/<default>/` renders its copy; `/<other>/` renders its own, or default-locale copy if
-        that locale has no JSON yet;
-  - [ ] an unsupported first segment (`/zz/`) is treated as content and prefixed, not crashed;
-  - [ ] with `markdownLocale`, `/<other>/x.md` redirects once to `/<markdownLocale>/x.md`;
+  - [ ] `'prefix'`: `/` answers 302 to `/<locale>/` (cookie, then `Accept-Language`, then geo,
+        then default); `/<default>/` renders its copy;
+  - [ ] `'prefix-except-default'`: `/` answers 200 in the default locale (the URL stays);
+        `/<default>/` answers 301 to `/`; `/` with a lang cookie for another locale answers 302
+        to `/<cookie>/`;
+  - [ ] both modes: a request without a cookie gets no `Set-Cookie`; `/<other>/` renders its
+        own copy, or default-locale copy if that locale has no JSON yet;
+  - [ ] an unsupported first segment (`/zz/`) is treated as content, not crashed (`'prefix'`:
+        prefixed; root mode: served as a default-locale path);
+  - [ ] with `markdownLocale`, `/<other>/x.md` redirects once to `/<markdownLocale>/x.md`
+        (`/x.md` in the root mode when `markdownLocale` is the default);
   - [ ] `<html lang>` is IETF-cased (`pt-BR`); hreflang tags exist for every locale plus
         `x-default`;
   - [ ] with a blog: the list shows every post in every locale, with the banner when one is
@@ -111,7 +117,7 @@ codes and no-zod-in-the-browser items hold always.
    `translationLocale` falls back to the default locale, so the UI shows default copy and the
    missing-translation banner says so.
 3. `npx edgekits-i18n seed`, then restart `npx astro dev` (the config is read at startup).
-4. Check `/<new>/`.
+4. Check `/<new>/`. Hreflang and the sitemap need no edit when they use `localizedPath`.
 5. Production: `npx edgekits-i18n migrate`, commit `.i18n-hashes.json`, deploy (the config
    change is code).
 

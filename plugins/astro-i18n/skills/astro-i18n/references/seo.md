@@ -3,12 +3,12 @@
 How pages consume `@edgekits/astro-i18n`, how to place its two components, and the SEO pieces
 the agent adds to the project. Imports come from the package entries:
 
-| Entry                               | Where                               | Holds (used here)                                                                                                                              |
-| ----------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@edgekits/astro-i18n/runtime`      | pages, layouts, endpoints (workerd) | `fetchTranslations`, `DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `LANGUAGES`, `fmt`, `pluralIcu`, `toIetfTag`, `replaceLocaleInPath`, `type Locale` |
-| `@edgekits/astro-i18n/format`       | anywhere, Node-safe                 | `fmt`, `plural`, `pluralIcu`, `toIetfTag`, `replaceLocaleInPath`, `getLangFromUrl`                                                             |
-| `@edgekits/astro-i18n/config`       | anywhere, Node-safe                 | `localesOf(config)` → `DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `LANGUAGES`                                                                       |
-| `@edgekits/astro-i18n/components/*` | `.astro` files                      | `LanguageSwitcher`, `MissingTranslationBanner`                                                                                                 |
+| Entry                               | Where                               | Holds (used here)                                                                                                                                       |
+| ----------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@edgekits/astro-i18n/runtime`      | pages, layouts, endpoints (workerd) | `fetchTranslations`, `DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `LANGUAGES`, `I18N_CONFIG`, `fmt`, `pluralIcu`, `toIetfTag`, `localizedPath`, `type Locale` |
+| `@edgekits/astro-i18n/format`       | anywhere, Node-safe                 | `fmt`, `plural`, `pluralIcu`, `toIetfTag`, `localizedPath`, `getLangFromUrl`                                                                            |
+| `@edgekits/astro-i18n/config`       | anywhere, Node-safe                 | `localesOf(config)` → `DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `LANGUAGES`                                                                                |
+| `@edgekits/astro-i18n/components/*` | `.astro` files                      | `LanguageSwitcher`, `MissingTranslationBanner`                                                                                                          |
 
 `./runtime` runs only in workerd. A module that Node loads (`src/content.config.ts` under
 `astro sync`, unit tests, anything imported by `astro.config`) takes its locale values from
@@ -44,6 +44,7 @@ a supported locale.
 ### Route layout
 
 Adopting the package on an existing site moves its pages; nothing else changes their paths.
+The layout is the same in both routing modes (the config's `routing`, the A0 answer):
 
 ```
 before                          after
@@ -58,11 +59,32 @@ src/pages/                      src/pages/
 
 - Every page moves under `src/pages/[lang]/` with the same relative path; relative imports in a
   moved file gain one `../`.
-- No `src/pages/index.astro` remains at the root: the middleware redirects `/` to
-  `/<locale>/`.
+- No `src/pages/index.astro` remains at the root, in either mode. In `'prefix'` the middleware
+  redirects `/` to `/<locale>/`. In `'prefix-except-default'` it serves a root URL (`/`,
+  `/about/`) by rewriting it internally to `/<defaultLocale>/…`: the visitor's URL stays, the
+  `[lang]` page renders.
 - Endpoints that are not localized stay at the root: `robots.txt`, `sitemap.xml`, `llms.txt`,
   `/api/*`. Files in `public/` are served as they are.
-- Links inside pages carry the locale: `` `/${Astro.locals.uiLocale}/about/` ``.
+- `Astro.originPathname` is the path the visitor requested; `Astro.url.pathname` is the path
+  that rendered, which in the root mode is the rewritten `/<defaultLocale>/…`. Canonical,
+  hreflang and links come from `localizedPath` over `Astro.originPathname`, never from
+  `Astro.url.pathname` directly.
+- Links inside pages go through `localizedPath`: `localizedPath(uiLocale, '/about/', pathOptions)`
+  is `/about/` for the default locale in the root mode and `/<locale>/about/` otherwise.
+  `pathOptions` is one small project module:
+
+  ```ts
+  // src/lib/paths.ts
+  import { DEFAULT_LOCALE, I18N_CONFIG, SUPPORTED_LOCALES } from '@edgekits/astro-i18n/runtime'
+
+  // The options `localizedPath` takes, from the config: the mode lives here, not in components.
+  export const pathOptions = {
+    routing: I18N_CONFIG.routing,
+    defaultLocale: DEFAULT_LOCALE,
+    isLocale: (segment: string) => (SUPPORTED_LOCALES as readonly string[]).includes(segment),
+  }
+  ```
+
 - The base layout sets `<html lang={toIetfTag(uiLocale)}>` (see "SEO suite" below); a layout
   with a hard-coded `lang` is the most common leftover.
 
@@ -302,9 +324,10 @@ original.
 ---
 // src/pages/[lang]/blog/[...slug].astro
 import { getEntry, render } from 'astro:content'
-import { DEFAULT_LOCALE } from '@edgekits/astro-i18n/runtime'
+import { DEFAULT_LOCALE, localizedPath } from '@edgekits/astro-i18n/runtime'
 import BaseLayout from '../../../layouts/BaseLayout.astro'
 import { getPostLocales } from '../../../lib/blog'
+import { pathOptions } from '../../../lib/paths'
 
 const { uiLocale } = Astro.locals
 const slug = Astro.params.slug ?? ''
@@ -317,7 +340,7 @@ if (!post) return Astro.rewrite(`/${uiLocale}/404/`)
 const isFallback = contentLocale !== uiLocale
 Astro.locals.isMissingContent = isFallback // the banner shows in 'content' mode
 const origin = import.meta.env.PROD ? 'https://example.com' : Astro.url.origin // as in the layout
-const canonicalOverride = isFallback ? `${origin}/${DEFAULT_LOCALE}/blog/${slug}/` : undefined
+const canonicalOverride = isFallback ? origin + localizedPath(DEFAULT_LOCALE, `/blog/${slug}/`, pathOptions) : undefined
 const { Content } = await render(post)
 ---
 
@@ -340,7 +363,7 @@ interface Props {
   canonicalOverride?: string
 }
 const { altLocales, canonicalOverride } = Astro.props
-const canonical = canonicalOverride ?? `${currentOrigin}${Astro.url.pathname}`
+const canonical = canonicalOverride ?? currentOrigin + localizedPath(uiLocale, Astro.originPathname, pathOptions)
 ---
 
 <link rel="canonical" href={canonical} />
@@ -358,9 +381,10 @@ card links to the URL-locale path; the post page falls back.
 ```astro
 ---
 // src/pages/[lang]/blog/index.astro
-import { DEFAULT_LOCALE, fetchTranslations } from '@edgekits/astro-i18n/runtime'
+import { DEFAULT_LOCALE, fetchTranslations, localizedPath } from '@edgekits/astro-i18n/runtime'
 import BaseLayout from '../../../layouts/BaseLayout.astro'
 import { getPostsWithFallback, splitId } from '../../../lib/blog'
+import { pathOptions } from '../../../lib/paths'
 
 const { uiLocale, translationLocale } = Astro.locals
 const { blog } = await fetchTranslations(translationLocale, ['blog'])
@@ -378,7 +402,7 @@ Astro.locals.isMissingContent = posts.some(({ isFallback }) => isFallback)
           <li>
             <article lang={isFallback ? locale : undefined}>
               <h2>
-                <a href={`/${uiLocale}/blog/${slug}/`}>{post.data.title}</a>
+                <a href={localizedPath(uiLocale, `/blog/${slug}/`, pathOptions)}>{post.data.title}</a>
               </h2>
               {isFallback && (
                 <span lang={uiLocale} title={blog.untranslated}>
@@ -412,8 +436,9 @@ helpers.
 ```astro
 ---
 // src/layouts/BaseLayout.astro (excerpt)
-import { toIetfTag } from '@edgekits/astro-i18n/runtime'
+import { localizedPath, toIetfTag } from '@edgekits/astro-i18n/runtime'
 import SeoHreflangs from '../components/seo/SeoHreflangs.astro'
+import { pathOptions } from '../lib/paths'
 
 const { uiLocale } = Astro.locals
 const currentOrigin = import.meta.env.PROD ? 'https://example.com' : Astro.url.origin
@@ -422,7 +447,7 @@ const currentOrigin = import.meta.env.PROD ? 'https://example.com' : Astro.url.o
 <html lang={toIetfTag(uiLocale)}>
   <head>
     <SeoHreflangs currentLang={uiLocale} currentOrigin={currentOrigin} />
-    <link rel="canonical" href={`${currentOrigin}${Astro.url.pathname}`} />
+    <link rel="canonical" href={currentOrigin + localizedPath(uiLocale, Astro.originPathname, pathOptions)} />
   </head>
   <!-- … -->
 </html>
@@ -437,7 +462,8 @@ Locale codes stay lowercase everywhere; `toIetfTag('pt-br')` returns `pt-BR` for
 ```astro
 ---
 // src/components/seo/SeoHreflangs.astro
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES, replaceLocaleInPath, toIetfTag } from '@edgekits/astro-i18n/runtime'
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, localizedPath, toIetfTag } from '@edgekits/astro-i18n/runtime'
+import { pathOptions } from '../../lib/paths'
 
 interface Props {
   currentLang: string
@@ -447,10 +473,11 @@ interface Props {
   altLocales?: readonly string[]
 }
 
-const { currentLang, currentOrigin, altLocales } = Astro.props
-const currentPath = Astro.url.pathname
+const { currentOrigin, altLocales } = Astro.props
+// The requested path: in the root mode `Astro.url.pathname` is the rewritten one.
+const path = Astro.originPathname
 const locales = altLocales ?? SUPPORTED_LOCALES
-const href = (code: string) => currentOrigin + replaceLocaleInPath(currentPath, currentLang, code)
+const href = (code: string) => currentOrigin + localizedPath(code, path, pathOptions)
 ---
 
 {
@@ -465,6 +492,11 @@ const href = (code: string) => currentOrigin + replaceLocaleInPath(currentPath, 
 }
 ```
 
+`x-default` is `localizedPath(DEFAULT_LOCALE, path, pathOptions)`: `/about/` in the root mode,
+`/en/about/` in `'prefix'`. The component has no mode-specific code: `pathOptions` carries the
+mode, and `localizedPath` strips whatever locale segment the path has. `currentLang` stays in
+the props, unused here, so the layout's call does not change.
+
 ### Sitemap, RSS, `llms.txt`, `robots.txt`
 
 Endpoints under `src/pages/`, running in workerd, so they import from `./runtime`:
@@ -472,13 +504,19 @@ Endpoints under `src/pages/`, running in workerd, so they import from `./runtime
 - `src/pages/sitemap.xml.ts`: every static route for every locale, plus content entries keyed
   `<locale>/<slug>`: the post files that exist, never a fallback URL (no `/de/blog/x` when
   only `en/x` exists).
+  Every `loc` goes through `localizedPath`, so in the root mode the default locale's entries
+  have no prefix:
   ```ts
-  import { SUPPORTED_LOCALES } from '@edgekits/astro-i18n/runtime'
-  for (const locale of SUPPORTED_LOCALES) for (const route of ['/', '/blog/']) entries.push({ loc: `${siteUrl}/${locale}${route}` })
+  import { SUPPORTED_LOCALES, localizedPath } from '@edgekits/astro-i18n/runtime'
+  import { pathOptions } from '../lib/paths'
+  for (const locale of SUPPORTED_LOCALES) for (const route of ['/', '/blog/']) entries.push({ loc: siteUrl + localizedPath(locale, route, pathOptions) })
   ```
   If the route list is shared with a Node-loaded module (a unit test, `content.config.ts`),
-  derive the locales there with `localesOf(i18nConfig)` from `./config` instead.
-- `src/pages/[lang]/rss.xml.ts`: one feed per locale, filtered by `Astro.locals.uiLocale`.
+  derive the locales there with `localesOf(i18nConfig)` from `./config` and take
+  `localizedPath` from `./format`, with the options built from the config the same way.
+- `src/pages/[lang]/rss.xml.ts`: one feed per locale, filtered by `Astro.locals.uiLocale`
+  (unchanged in both modes). In the root mode the default locale's feed URL has no prefix
+  (`/rss.xml`); the others stay `/<locale>/rss.xml`.
 - `src/pages/llms.txt.ts`: `DEFAULT_LOCALE` content only, to save the reader's context. Markdown
   twins of pages (`/<locale>/blog/x.md`) pair with the config's `markdownLocale`, which
   redirects every `.md` URL to that one locale.
@@ -487,6 +525,17 @@ Endpoints under `src/pages/`, running in workerd, so they import from `./runtime
   it with an `X-Robots-Tag: noindex` header on staging.
 
 ### URL strategy
+
+Which routing mode the project uses is the A0 answer (the config's `routing`), not the agent's
+choice.
+
+`'prefix-except-default'` (the default): the default locale lives at the root (`/`, `/about/`),
+every other locale under its prefix (`/de/about/`). `/en/about/` redirects permanently to
+`/about/`. A root URL consults neither Accept-Language nor the country; only a lang cookie for
+another locale (set by the switcher) redirects it, temporarily, to that locale.
+
+`'prefix'`: every URL starts with its locale (`/en/about/`); `/` and any URL without a locale
+redirect to the visitor's locale (cookie, Accept-Language, country, default).
 
 Keep content slugs in English across locales (`/de/blog/architecture`, not percent-encoded native
 slugs): no filesystem normalization issues, and content lookup by canonical id stays simple. For
