@@ -21,7 +21,7 @@ and TanStack agree. Nothing here sets a cookie or redirects; the switcher writes
 npm install @edgekits/tanstack-i18n @edgekits/i18n-core
 ```
 
-Peers: `hono` 4 and `react` 19. Write `edgekits-i18n.config.ts` and `locales/<locale>/<namespace>.json`
+Requires Node `>=22.23.4`. Peers: `hono` 4 and `react` 19. Write `edgekits-i18n.config.ts` and `locales/<locale>/<namespace>.json`
 as the [core README](https://github.com/EdgeKits/i18n/tree/main/packages/core#readme)
 describes, bind the `TRANSLATIONS` KV namespace in `wrangler.jsonc`, then generate and seed:
 

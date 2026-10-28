@@ -4,6 +4,46 @@ All notable changes to this package are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the package uses
 [Semantic Versioning](https://semver.org/).
 
+## 0.3.0 — 2026-10-28
+
+### Upgrading from 0.2.x
+
+- **Run the first `migrate` against production.** `.i18n-hashes.json` now holds one baseline per KV namespace id (`{ "<kvId>": { "<locale>:<ns>": "<hash>" } }`). An old flat file is adopted as the baseline of the first KV namespace a `migrate` writes, then rewritten in the new shape. Commit it as before.
+- **The edge cache starts cold once.** Cache URLs carry the entry format (`https://<keyPrefix>/i18n:v2:<locale>:<ns>`, encoded); 0.2.x entries are never read again and expire on their own. Expect one KV read per namespace and data center right after the deploy.
+- **`migrate` takes about a minute longer and can exit 1.** It purges, waits `--purge-delay` seconds (default 65) for KV to settle, and purges the same URLs again. It exits 1 when KV was updated but the edge cache was not purged (no `CLOUDFLARE_ZONE_ID` or token, or a failed purge); `.i18n-hashes.json` is then not written and the next run retries. A CI step that passed without purge credentials now fails.
+- **Regenerate and commit the generated files** (`npx edgekits-i18n bundle --fallbacks`, or `seed`). `I18n.Schema` types numbers and booleans as such and a list of objects as the union of its shapes. A `null` value and a namespace named `locale` are rejected. Hashes of namespaces with mixed-case keys change once (code-point key order), so the first `migrate` purges those namespaces too.
+- **`keyPrefix` must be a plain lower-case host** (`example.com`, `my-site`): no scheme, path, port syntax, space or upper case. `defineI18nConfig` throws otherwise.
+- **Node `>=22.23.4`.**
+- **Peer floors:** `astro` `^7.4.0`, `@astrojs/cloudflare` `^14.4.0`, `wrangler` `^4.152.0` (`npm i -D wrangler@^4.152.0` if npm reports a peer conflict).
+- **The build fails** on `trailingSlash: 'never'`, on a `base` other than `/`, and, with routing `'prefix-except-default'`, on a prerendered `[lang]` route (`export const prerender = true`). Each message says why.
+- **If you copied the skill's recipes:** the no-JS form recipe redirects to `ctx.originPathname` (since 0.2.2); the fallback-post recipe now answers a missing entry with `return Astro.rewrite('/404')`; `src/pages/404.astro` (and `500.astro`) stays at the root, not under `[lang]`, and reads the locale from `Astro.locals`.
+- **Responses change:** root-mode default-locale pages send `Vary: Cookie` (Cloudflare's cache ignores it: bypass or key on the lang cookie); a response that sets the lang cookie is `Cache-Control: private`; redirects of requests other than GET/HEAD are 307/308; a locale segment in another case (`/DE/…`) redirects to `/de/…`; `/404` and `/500` pass through untouched.
+
+### Changed
+
+- Built and tested on astro 7.4.2, `@astrojs/cloudflare` 14.4.2 and wrangler 4.154; peer floors raised to `astro` `^7.4.0`, `@astrojs/cloudflare` `^14.4.0`, `wrangler` `^4.152.0`; `engines.node` `>=22.23.4`.
+- The edge cache holds each namespace's raw KV value under versioned URLs (`i18n:v2:`) and merges the compiled fallback on every read, so a default-locale edit reaches every locale on the next deploy; a namespace KV lacks is cached as missing for 60 s (`@edgekits/i18n-core`).
+- Any path whose last segment has an extension that starts with a letter bypasses locale routing (`/site.webmanifest`, `/doc.pdf`); `/blog/v2.0` stays a page.
+- The ignored prefixes match on a segment boundary (`/apis/` is a page) and include `/_server-islands` and `/.well-known`.
+- The soft 404 on bypassed paths replaces only a 404 HTML response; other HTML (a server island) passes.
+- Redirects of requests other than GET/HEAD keep the method: 308 for a normalisation, 307 for a negotiated one.
+- Root-mode default-locale pages carry `Vary: Cookie`; a response that writes the lang cookie is `Cache-Control: private` (merged; `no-store` kept).
+- `localizedPath` keeps a file path without a trailing slash and keeps a `?query`/`#hash`; `toIetfTag` cases each subtag by length (`zh-Hant-TW`); `plural` interpolates both forms.
+- `LanguageSwitcher` keeps the query string when it navigates and writes `Secure` only on https; its file paths follow the core's rule. Markup unchanged.
+
+### Added
+
+- The integration refuses `trailingSlash: 'never'`, a `base` other than `/`, and in `'prefix-except-default'` a prerendered `[lang]` route, each with the reason.
+- A locale segment in another case (`/DE/about/`, `/pt-BR/`) gets one permanent redirect to the lower-case URL.
+- `isFilePath` in `./format`.
+
+### Fixed
+
+- The root-mode redirect of a `[lang]` file route's `/<defaultLocale>/…` form could produce a protocol-relative `Location` (`/en//evil.com/x.png` -> `//evil.com/x.png`); every target is now built from path segments.
+- `/404` and `/500` pass through untouched in both modes (they were redirected, or rewritten again when Astro re-ran the middleware for the error page); on that re-entry the visitor's locale stays in `Astro.locals`.
+- Server islands in `'prefix-except-default'` were redirected to a trailing-slash URL and their HTML replaced by the soft 404.
+- `/.well-known/…` URLs were treated as pages.
+
 ## 0.2.2 — 2026-10-27
 
 ### Fixed

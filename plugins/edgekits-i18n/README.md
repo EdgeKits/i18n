@@ -107,6 +107,7 @@ npx skills add EdgeKits/i18n --skill astro-i18n
   `output: 'server'` in `astro.config`.
 - wrangler `^4.152` installed in the project (`npm i -D wrangler`) and a `wrangler.jsonc`. The
   package's CLI runs the project's own wrangler, never a global one.
+- Node `>=22.23.4`.
 - A git repository (`git init`): the generated files and the purge baseline
   (`.i18n-hashes.json`) are committed, and `migrate` checks the baseline against git (outside
   a repository it skips that check, with a warning).

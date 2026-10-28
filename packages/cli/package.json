@@ -1,6 +1,6 @@
 {
   "name": "edgekits-i18n",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "The edgekits-i18n command of the EdgeKits i18n engine: installs @edgekits/i18n-core and runs its CLI.",
   "keywords": [
     "i18n",
@@ -22,7 +22,7 @@
     "url": "https://github.com/EdgeKits/i18n/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.23.4"
   },
   "bin": {
     "edgekits-i18n": "bin.js"
@@ -36,6 +36,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@edgekits/i18n-core": "0.2.2"
+    "@edgekits/i18n-core": "0.3.0"
   }
 }

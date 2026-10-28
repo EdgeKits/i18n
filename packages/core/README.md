@@ -11,6 +11,8 @@ CLI. A framework adapter builds on it: for Astro, use
 [`@edgekits/astro-i18n`](https://github.com/EdgeKits/i18n/tree/main/packages/astro#readme),
 which depends on this package and needs nothing else from you.
 
+Requires Node `>=22.23.4` (the CLI runs under it; the engine itself runs in workerd).
+
 ## `createI18n`
 
 One instance per project: your config, the CLI's generated modules, and the platform bindings.
