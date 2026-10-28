@@ -210,3 +210,84 @@ for (const [kind, userPreference] of FAILING_HOOKS) {
     assert.equal(warn.mock.callCount(), 2)
   })
 }
+
+// ---------------------------------------------------------------------------
+// Pre-tag fixes (0.3.0): one userPreference read per request; Vary on HTML.
+// ---------------------------------------------------------------------------
+
+// The middleware, then a handler that runs the loader on the same Request (as the SSR
+// document's server function does through getRequest()).
+function appWithLoader(options: Parameters<typeof i18nMiddleware>[1]) {
+  const load = createTranslationsLoader(i18n, options)
+  const app = new Hono<{ Variables: I18nVariables<FixtureLocale> }>()
+  app.use(i18nMiddleware(i18n, options))
+  app.get('/', async (c) => {
+    const first = await load(c.req.raw, [])
+    const second = await load(c.req.raw, [])
+    return c.text(`${c.var.locale} ${first.locale} ${second.locale}`)
+  })
+  return app
+}
+
+test('userPreference runs once per Request: the middleware and every loader share its answer', async () => {
+  for (const isAsync of [false, true]) {
+    const calls: Request[] = []
+    const userPreference = isAsync
+      ? async (request: Request) => (calls.push(request), 'es')
+      : (request: Request) => (calls.push(request), 'es')
+    const response = await appWithLoader({ userPreference }).request('/', { headers: { 'accept-language': 'de' } })
+    assert.equal(await response.text(), 'es es es')
+    assert.equal(calls.length, 1, `async ${isAsync}`)
+
+    // Another request is asked again.
+    await appWithLoader({ userPreference }).request('/', { headers: { 'accept-language': 'de' } })
+    assert.equal(calls.length, 2, `async ${isAsync}`)
+  }
+})
+
+for (const [kind, userPreference] of FAILING_HOOKS) {
+  test(`a ${kind} userPreference fails once per Request: one onUserPreferenceError, one console.warn`, async (t) => {
+    const errors: unknown[] = []
+    const reported = { userPreference, onUserPreferenceError: (error: unknown) => void errors.push(error) }
+    const response = await appWithLoader(reported).request('/', { headers: { 'accept-language': 'de' } })
+    assert.equal(await response.text(), 'de de de')
+    assert.equal(errors.length, 1)
+
+    const warn = t.mock.method(console, 'warn', () => {})
+    await appWithLoader({ userPreference }).request('/', { headers: { 'accept-language': 'de' } })
+    assert.equal(warn.mock.callCount(), 1)
+  })
+}
+
+test('an HTML response gets Vary: Cookie, Accept-Language, merged with an existing Vary', async () => {
+  const cases: Array<[existing: string | undefined, expected: string]> = [
+    [undefined, 'Cookie, Accept-Language'],
+    ['Origin', 'Origin, Cookie, Accept-Language'],
+    ['cookie', 'cookie, Accept-Language'],
+    ['Accept-Language, Cookie', 'Accept-Language, Cookie'],
+    ['*', '*'],
+  ]
+  for (const [existing, expected] of cases) {
+    const app = new Hono<{ Variables: I18nVariables<FixtureLocale> }>()
+    app.use(i18nMiddleware(i18n))
+    app.get('/', (c) => c.html('<html></html>', 200, existing ? { Vary: existing } : {}))
+    const response = await app.request('/')
+    assert.equal(response.headers.get('vary'), expected, String(existing))
+  }
+
+  // An immutable response (one passed through from fetch()) is copied, not thrown on.
+  const passthrough = new Hono<{ Variables: I18nVariables<FixtureLocale> }>()
+  passthrough.use(i18nMiddleware(i18n))
+  passthrough.get('/', () => fetch('data:text/html,<html></html>'))
+  assert.equal((await passthrough.request('/')).headers.get('vary'), 'Cookie, Accept-Language')
+})
+
+test('a non-HTML response is left as it is', async () => {
+  const app = new Hono<{ Variables: I18nVariables<FixtureLocale> }>()
+  app.use(i18nMiddleware(i18n))
+  app.get('/text', (c) => c.text('ok'))
+  app.get('/json', (c) => c.json({ ok: true }))
+  for (const path of ['/text', '/json']) {
+    assert.equal((await app.request(path)).headers.get('vary'), null, path)
+  }
+})

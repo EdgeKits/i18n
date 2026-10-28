@@ -14,7 +14,10 @@ import config from './fixtures/i18n.config.ts'
 
 type Setup = {
   kv?: Record<string, unknown>
+  // Entries the fetcher wrote: they carry its marker header.
   cached?: Record<string, unknown>
+  // Entries something else wrote at the same URL: no marker.
+  foreign?: Record<string, unknown>
   fallbacks?: Record<string, unknown>
   cacheEnabled?: boolean
   noCache?: boolean
@@ -24,6 +27,9 @@ type Setup = {
 }
 
 const RUNTIME_CONSTANTS = { NAMESPACE_KEYS: [], LOCALES_WITH_TRANSLATIONS: [], FULLY_TRANSLATED_LOCALES: [] }
+
+// The header the fetcher puts on its own entries (lower case, as `Headers` reads it back).
+const MARKER = 'x-edgekits-i18n'
 
 const KEYS = createI18n(config, { fallbacks: {}, runtimeConstants: RUNTIME_CONSTANTS }, {} as Bindings)
 const kvKey = (ns: string) => KEYS.buildTranslationKvKey('de', ns)
@@ -40,21 +46,32 @@ function setup(options: Setup = {}) {
     },
   }
 
-  const cacheStore = new Map(Object.entries(options.cached ?? {}).map(([url, value]) => [url, JSON.stringify(value)]))
+  type Entry = { body: string; headers: Record<string, string> }
+  const cacheStore = new Map<string, Entry>([
+    ...Object.entries(options.cached ?? {}).map(([url, value]): [string, Entry] => [
+      url,
+      { body: JSON.stringify(value), headers: { [MARKER]: 'v2' } },
+    ]),
+    ...Object.entries(options.foreign ?? {}).map(([url, value]): [string, Entry] => [
+      url,
+      { body: JSON.stringify(value), headers: {} },
+    ]),
+  ])
   const cacheCalls: string[] = []
   const puts: { url: string; body: unknown; headers: Record<string, string> }[] = []
   const cache: EdgeCache = {
     async match(request) {
       cacheCalls.push(`match ${request.url}`)
-      const body = cacheStore.get(request.url)
-      return body === undefined ? undefined : new Response(body)
+      const entry = cacheStore.get(request.url)
+      return entry === undefined ? undefined : new Response(entry.body, { headers: entry.headers })
     },
     // Stored as well as recorded, so a later call on the same instance sees what was written.
     async put(request, response) {
       cacheCalls.push(`put ${request.url}`)
       const body = await response.json()
-      cacheStore.set(request.url, JSON.stringify(body))
-      puts.push({ url: request.url, body, headers: Object.fromEntries(response.headers) })
+      const headers = Object.fromEntries(response.headers)
+      cacheStore.set(request.url, { body: JSON.stringify(body), headers })
+      puts.push({ url: request.url, body, headers })
     },
   }
 
@@ -313,4 +330,71 @@ test('bindings are read at call time, never when the instance is created', async
 
   await i18n.fetchTranslations('de', ['common'])
   assert.deepEqual(reads, ['cacheEnabled', 'cache', 'kv'])
+})
+
+// ---------------------------------------------------------------------------
+// Pre-tag fixes (0.3.0): the entry marker, no unread clone, fallback isolation.
+// ---------------------------------------------------------------------------
+
+test('the fetcher marks its own entries with X-EdgeKits-I18n: v2', async () => {
+  const { i18n, puts, scheduled } = setup({ kv: { [kvKey('common')]: { title: 'Hallo' } } })
+  await i18n.fetchTranslations('de', ['common', 'blog'])
+  await Promise.all(scheduled)
+  assert.deepEqual(
+    puts.map(({ url, headers }) => [url, headers[MARKER]]),
+    [
+      [cacheUrl('common'), 'v2'],
+      [cacheUrl('blog'), 'v2'],
+    ],
+  )
+})
+
+test('an entry without the marker is a miss: never read as translations, replaced from KV', async () => {
+  const { i18n, kvCalls, cacheStore, scheduled } = setup({
+    foreign: { [cacheUrl('common')]: { title: '<script>x</script>' } },
+    kv: { [kvKey('common')]: { title: 'Hallo' } },
+  })
+
+  assert.deepEqual(await i18n.fetchTranslations('de', ['common']), { common: { title: 'Hallo' } })
+  assert.deepEqual(kvCalls, [[kvKey('common')]])
+  await Promise.all(scheduled)
+  assert.deepEqual(JSON.parse(cacheStore.get(cacheUrl('common'))!.body), { title: 'Hallo' })
+  assert.equal(cacheStore.get(cacheUrl('common'))!.headers[MARKER], 'v2')
+
+  // A marker with another value is foreign too.
+  const other = setup({ kv: { [kvKey('common')]: { title: 'Hallo' } } })
+  other.cacheStore.set(cacheUrl('common'), { body: '{"title":"old"}', headers: { [MARKER]: 'v1' } })
+  assert.deepEqual(await other.i18n.fetchTranslations('de', ['common']), { common: { title: 'Hallo' } })
+})
+
+test('the fetcher hands cache.put its Response, never an unread clone', async (t) => {
+  const clone = t.mock.method(Response.prototype, 'clone')
+  const { i18n, scheduled } = setup({ kv: { [kvKey('common')]: { title: 'Hallo' } } })
+  await i18n.fetchTranslations('de', ['common', 'blog'])
+  await Promise.all(scheduled)
+  assert.equal(clone.mock.callCount(), 0)
+})
+
+test("a returned namespace is the caller's own: mutating it never changes the next result", async () => {
+  const fallbacks = () => ({ FALLBACK_COMMON: { nav: { home: 'Home' }, title: 'Hello' } })
+  const cases: Array<[string, Setup]> = [
+    ['cache hit', { cached: { [cacheUrl('common')]: { title: 'Hallo' } } }],
+    ['cache miss', { kv: { [kvKey('common')]: { title: 'Hallo' } } }],
+    ['KV missing the key', {}],
+    ['KV failure', { kvThrows: true }],
+    ['cache off', { cacheEnabled: false, kv: { [kvKey('common')]: { title: 'Hallo' } } }],
+    ['cache off, KV failure', { cacheEnabled: false, kvThrows: true }],
+  ]
+  for (const [name, options] of cases) {
+    const shared = fallbacks()
+    const { i18n, scheduled } = setup({ ...options, fallbacks: shared })
+    const first = (await i18n.fetchTranslations('de', ['common'])) as any
+    first.common.nav.home = 'mutated'
+    first.common.title = 'mutated'
+    await Promise.all(scheduled)
+    const second = (await i18n.fetchTranslations('de', ['common'])) as any
+    assert.equal(second.common.nav.home, 'Home', name)
+    assert.notEqual(second.common.title, 'mutated', name)
+    assert.deepEqual(shared, fallbacks(), `${name}: the module's fallback object is untouched`)
+  }
 })

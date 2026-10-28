@@ -17,6 +17,11 @@ import { deepMerge } from './deep-merge.ts'
  * degrades to default-locale text for the keys it predates instead of handing pages
  * `undefined` (see ADR-0014 and the 2026-07-18 `/en/blog/` incident).
  *
+ * The result is the caller's own: the fallback is a module-level object shared by every
+ * request in the isolate, so it is deep-copied first (`structuredClone`; deepMerge copies
+ * only the levels the raw value overrides). A page that mutates what it was handed never
+ * changes the next request's text.
+ *
  * Deliberately pure — no `cloudflare:workers` imports, so it is testable under
  * plain Node (`npm test`).
  */
@@ -25,5 +30,5 @@ export function assembleNamespace(rawValue: unknown, fallback: unknown): object 
 
   if (!fallback) return raw
 
-  return deepMerge(fallback as object, raw)
+  return deepMerge(structuredClone(fallback) as object, raw)
 }

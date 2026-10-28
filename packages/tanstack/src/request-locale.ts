@@ -33,6 +33,10 @@ export type RequestLocaleOptions = {
  * `userPreference` may be async, the core's cascade is not: it is awaited here, and only
  * when the cookie carries no valid locale. A hook that throws or rejects counts as no
  * preference (see `onUserPreferenceError`).
+ *
+ * The hook runs once per Request: the middleware and every loader of one request (the SSR
+ * document's server functions get the same Request through getRequest()) share its answer,
+ * and a failure is reported once. The first caller's options decide.
  */
 export async function resolveRequestLocale<L extends string>(
   i18n: RequestI18n<L>,
@@ -51,7 +55,19 @@ export async function resolveRequestLocale<L extends string>(
   })
 }
 
-async function readUserPreference(request: Request, options: RequestLocaleOptions): Promise<string | null | undefined> {
+// One `userPreference` answer per Request, kept while the Request lives.
+const preferences = new WeakMap<Request, Promise<string | null | undefined>>()
+
+function readUserPreference(request: Request, options: RequestLocaleOptions): Promise<string | null | undefined> {
+  let preference = preferences.get(request)
+  if (!preference) {
+    preference = callUserPreference(request, options)
+    preferences.set(request, preference)
+  }
+  return preference
+}
+
+async function callUserPreference(request: Request, options: RequestLocaleOptions): Promise<string | null | undefined> {
   try {
     return await options.userPreference?.(request)
   } catch (error) {

@@ -48,6 +48,12 @@ const KV_BATCH_LIMIT = 100
 const CACHE_CONTROL_VALUE = 'public, s-maxage=31536000, immutable'
 const CACHE_CONTROL_MISSING = 'public, s-maxage=60'
 
+// The fetcher's mark on its own entries. The cache URL sits on a hostname of the site's zone,
+// so a response something else left at that URL is a miss, never read as translations.
+// The value is the entry format, as in the URL (`i18n:v2:…`).
+const ENTRY_MARKER = 'X-EdgeKits-I18n'
+const ENTRY_FORMAT = 'v2'
+
 export function createFetchTranslations<L extends string>({
   fallbacks: FALLBACKS,
   bindings,
@@ -65,7 +71,8 @@ export function createFetchTranslations<L extends string>({
    * An entry holds what KV holds: the raw value of the namespace's key, or a `null`
    * marker when KV has none (cached for 60 s). Never the merged namespace: the
    * compiled fallback is merged on every read, so a fallback change reaches every
-   * locale on the next deploy (ADR-0033).
+   * locale on the next deploy (ADR-0033). Each entry carries `X-EdgeKits-I18n: v2`; a
+   * response at the URL without it is a miss, read again from KV and replaced.
    *
    * Cache invalidation is handled explicitly by the Cloudflare Purge API
    * in `edgekits-i18n migrate` — only namespaces whose content actually changed
@@ -119,9 +126,10 @@ export function createFetchTranslations<L extends string>({
         const cacheRequest = buildTranslationCacheRequest(locale, ns)
         try {
           const cached = await cache.match(cacheRequest)
-          if (cached) {
+          if (cached?.headers.get(ENTRY_MARKER) === ENTRY_FORMAT) {
             return { ns, data: await cached.json(), hit: true }
           }
+          if (cached) debug(`i18n cache entry for ${ns} lacks ${ENTRY_MARKER}: treated as a miss`)
         } catch (error) {
           debug(`i18n cache READ error for ${ns}`, error)
         }
@@ -201,11 +209,12 @@ export function createFetchTranslations<L extends string>({
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': kvValue === null ? CACHE_CONTROL_MISSING : CACHE_CONTROL_VALUE,
+          [ENTRY_MARKER]: ENTRY_FORMAT,
         },
       })
 
       putPromises.push(
-        cache.put(cacheRequest, response.clone()).catch((error: unknown) => {
+        cache.put(cacheRequest, response).catch((error: unknown) => {
           const errorMsg = error instanceof Error ? error.message : String(error)
           debug(`i18n cache WRITE error for ${ns}`, errorMsg)
         }),
@@ -249,10 +258,10 @@ export function createFetchTranslations<L extends string>({
     for (let i = 0; i < namespaces.length; i++) {
       const ns = namespaces[i] as N
       const key = keys[i] as string
-      // A namespace whose read failed gets its compiled fallback alone.
-      ;(data as any)[ns] = failedKvKeys.has(key)
-        ? (getFallback(ns) ?? {})
-        : assembleNamespace(kvResults.get(key) ?? null, getFallback(ns))
+      // A namespace whose read failed gets its compiled fallback alone (a copy, as every
+      // assembled namespace is).
+      const kvValue = failedKvKeys.has(key) ? null : (kvResults.get(key) ?? null)
+      ;(data as any)[ns] = assembleNamespace(kvValue, getFallback(ns))
     }
 
     return data as PickSchema<N>
