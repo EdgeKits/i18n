@@ -215,8 +215,8 @@ A locale without a `countryCode` shows its name alone. A `countryCode` whose SVG
 
 Before it reports back, the skill runs its adoption checklist: the config matches your answers
 and every locale code is lowercase; `seed` writes the generated files and leaves
-`.i18n-hashes.json` alone; `astro check` passes; under `astro dev`, `/` redirects to a locale,
-each locale renders its own copy (or the default locale's, if it has no JSON yet), an unknown
+`.i18n-hashes.json` alone; `astro check` passes; under `astro dev`, `/` redirects to a locale
+(`'prefix'`) or renders the default locale (`'prefix-except-default'`), each locale renders its own copy (or the default locale's, if it has no JSON yet), an unknown
 first segment such as `/zz/` is prefixed rather than crashing, `<html lang>` reads `pt-BR` on a
 `pt-br` page, hreflang tags cover every locale plus `x-default`, and the switcher changes the
 URL and sets the language cookie. It also checks that no page is left at `src/pages/*.astro`
@@ -242,7 +242,7 @@ seed`. A key that exists only in another locale is not typed.
 
 `.i18n-hashes.json` records what production KV holds. Only a successful `migrate` writes it,
 it is committed right after, and nothing else edits it. `migrate` refuses to run while that
-file has uncommitted changes.
+file's baseline for the KV namespace it writes differs from the committed one.
 
 ### Forms and SEO
 
@@ -286,13 +286,14 @@ canonical at the original instead of using `noindex`.
   run since. Add it to the default locale and run `seed` (or `bundle`); if the editor still
   shows the error, restart its TypeScript server.
 - **`Cannot find module 'cloudflare:workers'` in `tsc`.** Run `npx wrangler types`.
-- **`migrate` refuses to run.** `.i18n-hashes.json` has uncommitted changes. If the last
-  `migrate` wrote it, commit it. If anything else changed it, discard the change with
+- **`migrate` refuses to run.** The baseline of the KV namespace it writes, in
+  `.i18n-hashes.json`, differs from the committed one. If the last `migrate` wrote it, commit it. If anything else changed it, discard the change with
   `git checkout .i18n-hashes.json` and run `migrate` again. Never edit or delete it to get
   past the check.
 - **`migrate` exits 1 after "KV is updated; the edge cache is not".** The purge was skipped or
-  failed: the zone ID or token is missing, or the Purge API refused. Fix it and run `migrate`
-  again; it retries the same purge. If it exited 0 and the site still shows old copy, the zone
+  failed (the zone ID or token is missing or malformed, or the Purge API refused), or deleting
+  the KV keys of removed files failed. Fix it and run `migrate` again; it retries the same
+  deletions and purge. If it exited 0 and the site still shows old copy, the zone
   is not proxied.
 - **npm 12: `esbuild` or `workerd` did not install.** npm 12 blocks dependency install
   scripts by default and lists the skipped packages at the end of `npm install`. Both need

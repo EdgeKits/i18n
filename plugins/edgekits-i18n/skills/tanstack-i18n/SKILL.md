@@ -43,7 +43,9 @@ wait, in every mode. If asking is impossible, stop and print the open questions.
 
 ## A1. Wire the app: follow the package README for the code
 
-`npm i @edgekits/tanstack-i18n @edgekits/i18n-core` in the app. Then, by name:
+`npm i @edgekits/tanstack-i18n @edgekits/i18n-core` in the app, and `npm i -D wrangler` there
+(the CLI runs the wrangler of the Worker whose `wrangler.jsonc` it reads, never a global one).
+Then, by name:
 
 1. `src/i18n/instance.ts`: `createI18n` over the shared config, the generated
    `fallbacks.generated` and `runtime-constants`, and the Worker bindings (`env.TRANSLATIONS`,
@@ -53,8 +55,8 @@ wait, in every mode. If asking is impossible, stop and print the open questions.
    `c.req.raw` to TanStack unchanged (server functions live under the case-sensitive
    `/_serverFn/`).
 3. `src/i18n/server.ts`: the app-declared server function: `createServerFn` whose validator
-   rejects anything `isNamespaceList(i18n)` refuses, and whose handler is
-   `load(getRequest(), data)`.
+   rejects anything `isNamespaceList(i18n)` refuses, and whose handler sets
+   `Cache-Control: private, no-store` (as the README does) and returns `load(getRequest(), data)`.
 4. The root route: its loader fetches `common`; its component wraps the app in `I18nProvider`
    with `locale`, `translations`, `languages` (`localesOf(config).LANGUAGES`) and `cookie`
    (`config.cookie`). `<html lang>` is `locale`, the UI locale; the loader's
@@ -99,6 +101,8 @@ purge zone are shared. Commit `.i18n-hashes.json` next to the config after each 
    `<localesDir>/<new>/` with its JSON.
 2. Seed or migrate with both paths. The switcher shows it, since it reads `languages`; no
    component changes.
+3. Rebuild and deploy every Worker: the locale list is compiled in from the config, so the new
+   locale serves only after a deploy; `migrate` alone puts its text in KV.
 
 ## Guardrails
 

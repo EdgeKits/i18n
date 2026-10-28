@@ -29,6 +29,25 @@ function withLocales(files: Record<string, string>, check: (dir: string) => void
 // What the CLI shows: `locales/<locale>/<file>`, forward slashes.
 const display = (dir: string) => (file: string) => ['locales', ...path.relative(dir, file).split(path.sep)].join('/')
 
+test('collect: locales and namespaces come back sorted by code point, whatever the file system lists', () => {
+  withLocales(
+    {
+      'pt-br/alpha.json': '{}',
+      'pt/alpha.json': '{}',
+      'en/alpha.json': '{}',
+      'en/Zeta.json': '{}',
+      'en/beta.json': '{}',
+      'en/a-b.json': '{}',
+      'en/a.json': '{}',
+    },
+    (dir) => {
+      const { collected } = collectTranslations(dir, display(dir))
+      assert.deepEqual(Object.keys(collected), ['en', 'pt', 'pt-br'])
+      assert.deepEqual(Object.keys(collected.en!), ['Zeta', 'a', 'a-b', 'alpha', 'beta'])
+    },
+  )
+})
+
 test('collect: a leading BOM is stripped', () => {
   withLocales({ 'en/common.json': '\uFEFF{ "title": "Hello" }' }, (dir) => {
     assert.deepEqual(collectTranslations(dir, display(dir)).collected, { en: { common: { title: 'Hello' } } })

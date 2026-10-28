@@ -25,7 +25,9 @@ package is installed; `npx edgekits-i18n --help` lists the CLI.
       `edgekitsI18n(i18nConfig)` in `integrations`. With `{ middleware: 'manual' }`,
       `src/middleware.ts` puts `onRequest` from `@edgekits/astro-i18n/middleware` in its
       `sequence(...)`. An `i18n` block of the project's own covers every configured locale and
-      the same default (the build stops otherwise); without one, the integration sets it.
+      the same default, and routes with `prefixDefaultLocale: true` and
+      `redirectToDefaultLocale: false` (the build stops otherwise); without one, the
+      integration sets it.
 - [ ] `wrangler.jsonc` has the `TRANSLATIONS` KV binding and a `compatibility_date`.
 - [ ] `npx edgekits-i18n seed` runs without error and writes `i18n-data.json`,
       `src/i18n.generated.d.ts`, `<generatedDir>/runtime-constants.ts` and
@@ -38,7 +40,8 @@ package is installed; `npx edgekits-i18n --help` lists the CLI.
   - [ ] `'prefix'`: `/` answers 302 to `/<locale>/` (cookie, then `Accept-Language`, then geo,
         then default); `/<default>/` renders its copy;
   - [ ] `'prefix-except-default'`: `/` answers 200 in the default locale (the URL stays);
-        `/<default>/` answers 301 to `/`; `/` with a lang cookie for another locale answers 302
+        `/<default>/` answers 302 to `/` under `astro dev` (301 in a build); `/` with a lang
+        cookie for another locale answers 302
         to `/<cookie>/`;
   - [ ] both modes: a request without a cookie gets no `Set-Cookie`; `/<other>/` renders its
         own copy, or default-locale copy if that locale has no JSON yet;
@@ -66,10 +69,11 @@ package is installed; `npx edgekits-i18n --help` lists the CLI.
       it, never print it, never pass it on a command line.
 - [ ] The Worker deployed at least once.
 - [ ] `npx edgekits-i18n migrate` pushes to production KV and purges only the changed namespaces
-      (its log lists them), twice, 65 s apart. Exit 1 after "KV is updated; the edge cache is
-      not" means the purge did not happen: fix the zone ID or token and run it again.
+      (its log lists them), twice, 65 s apart. Ask the user before running it. Exit 1 after
+      "KV is updated; the edge cache is not" means the purge or the deletion of removed keys
+      did not happen: fix the zone ID or token and run it again.
 - [ ] `.i18n-hashes.json` committed right after every successful `migrate`; `migrate` refuses
-      to run while it has uncommitted changes.
+      to run while its entry for the KV namespace it writes differs from the committed one.
 
 ## Verify: localized form (Workflow B)
 
@@ -153,6 +157,11 @@ codes and no-zod-in-the-browser items hold always.
   workerd-only. Use `localesOf(i18nConfig)` from `./config` and the helpers from `./format`.
 - **Mixed-case locale (`pt-BR`) in a URL or folder**: use lowercase (`pt-br`); only
   `toIetfTag()` upper-cases the region, for `<html lang>` and hreflang.
-- **`migrate` updated KV but the site shows old copy**: the purge was skipped (zone not
-  proxied, zone ID or token missing). KV is updated either way; fix the setting and run
-  `migrate` again: `.i18n-hashes.json` was not written, so it retries the same purge.
+- **`migrate` exited 1 after "KV is updated; the edge cache is not"**: the purge was skipped
+  or failed (zone ID or token missing or malformed, the Purge API refused), or deleting the
+  removed files' keys failed. KV is updated either way; fix it and run `migrate` again:
+  `.i18n-hashes.json` was not written, so it retries the same deletions and purge.
+- **`migrate` exited 0 but the site shows old copy**: the purge reached nothing (the zone is
+  not proxied, or `keyPrefix` is a host outside it: `migrate` warns when the token can read the
+  zone), or nothing changed against the baseline (after a `git revert` of translations the
+  baseline is reverted too: run `migrate --purge-all`).

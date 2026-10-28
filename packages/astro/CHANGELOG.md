@@ -8,14 +8,15 @@ All notable changes to this package are documented here. The format follows
 
 ### Upgrading from 0.2.x
 
-- **Run the first `migrate` against production.** `.i18n-hashes.json` now holds one baseline per KV namespace id (`{ "<kvId>": { "<locale>:<ns>": "<hash>" } }`). An old flat file is adopted as the baseline of the first KV namespace a `migrate` writes, then rewritten in the new shape. Commit it as before.
+- **`.i18n-hashes.json` changes shape.** It now holds one baseline per KV namespace id (`{ "<kvId>": { "<locale>:<ns>": "<hash>" } }`). An old flat file is the baseline of the top-level `TRANSLATIONS` id (what 0.2.x wrote), whichever environment migrates first, and is rewritten in the new shape. Commit it as before.
 - **The edge cache starts cold once.** Cache URLs carry the entry format (`https://<keyPrefix>/i18n:v2:<locale>:<ns>`, encoded); 0.2.x entries are never read again and expire on their own. Expect one KV read per namespace and data center right after the deploy.
 - **`migrate` takes about a minute longer and can exit 1.** It purges, waits `--purge-delay` seconds (default 65) for KV to settle, and purges the same URLs again. It exits 1 when KV was updated but the edge cache was not purged (no `CLOUDFLARE_ZONE_ID` or token, or a failed purge); `.i18n-hashes.json` is then not written and the next run retries. A CI step that passed without purge credentials now fails.
-- **Regenerate and commit the generated files** (`npx edgekits-i18n bundle --fallbacks`, or `seed`). `I18n.Schema` types numbers and booleans as such and a list of objects as the union of its shapes. A `null` value and a namespace named `locale` are rejected. Hashes of namespaces with mixed-case keys change once (code-point key order), so the first `migrate` purges those namespaces too.
+- **Regenerate and commit the generated files** (`npx edgekits-i18n bundle --fallbacks`, or `seed`). `I18n.Schema` types numbers and booleans as such and a list of objects as one merged object type (a key every element has is required, any other optional, a key of differing types a union); a list that mixes strings and objects stops the run. A `null` value and a namespace named `locale` are rejected. Hashes of namespaces with mixed-case keys change once (code-point key order), so the first `migrate` purges those namespaces too.
 - **`keyPrefix` must be a plain lower-case host** (`example.com`, `my-site`): no scheme, path, port syntax, space or upper case. `defineI18nConfig` throws otherwise.
+- **The CLI is stricter.** An unknown argument (`-e staging`) exits 1 naming it; `--purge-delay` is at most 600; `CLOUDFLARE_ZONE_ID` must be 32 hex characters. With `--env <name>`, `.dev.vars.<name>` replaces `.dev.vars` when it exists, as in wrangler. `migrate` compares only the baseline of the KV namespace it writes with the committed file, so `migrate --env staging && migrate` runs in one job.
 - **Node `>=22.23.4`.**
 - **Peer floors:** `astro` `^7.4.0`, `@astrojs/cloudflare` `^14.4.0`, `wrangler` `^4.152.0` (`npm i -D wrangler@^4.152.0` if npm reports a peer conflict).
-- **The build fails** on `trailingSlash: 'never'`, on a `base` other than `/`, and, with routing `'prefix-except-default'`, on a prerendered `[lang]` route (`export const prerender = true`). Each message says why.
+- **The build fails** on `trailingSlash: 'never'`, on a `base` other than `/`, on a prerendered `404.astro` (either mode), and, with routing `'prefix-except-default'`, on a prerendered `[lang]` route (`export const prerender = true`). Each message says why.
 - **If you copied the skill's recipes:** the no-JS form recipe redirects to `ctx.originPathname` (since 0.2.2); the fallback-post recipe now answers a missing entry with `return Astro.rewrite('/404')`; `src/pages/404.astro` (and `500.astro`) stays at the root, not under `[lang]`, and reads the locale from `Astro.locals`.
 - **Responses change:** root-mode default-locale pages send `Vary: Cookie` (Cloudflare's cache ignores it: bypass or key on the lang cookie); a response that sets the lang cookie is `Cache-Control: private`; redirects of requests other than GET/HEAD are 307/308; a locale segment in another case (`/DE/…`) redirects to `/de/…`; `/404` and `/500` pass through untouched.
 
@@ -33,14 +34,15 @@ All notable changes to this package are documented here. The format follows
 
 ### Added
 
-- The integration refuses `trailingSlash: 'never'`, a `base` other than `/`, and in `'prefix-except-default'` a prerendered `[lang]` route, each with the reason.
+- The integration refuses `trailingSlash: 'never'`, a `base` other than `/`, a prerendered `404.astro` (served without the middleware; `Astro.rewrite('/404')` into it is a 500), and in `'prefix-except-default'` a prerendered `[lang]` route, each with the reason.
 - A locale segment in another case (`/DE/about/`, `/pt-BR/`) gets one permanent redirect to the lower-case URL.
 - `isFilePath` in `./format`.
 
 ### Fixed
 
 - The root-mode redirect of a `[lang]` file route's `/<defaultLocale>/…` form could produce a protocol-relative `Location` (`/en//evil.com/x.png` -> `//evil.com/x.png`); every target is now built from path segments.
-- `/404` and `/500` pass through untouched in both modes (they were redirected, or rewritten again when Astro re-ran the middleware for the error page); on that re-entry the visitor's locale stays in `Astro.locals`.
+- `/404` and `/500` pass through untouched in both modes (they were redirected, or rewritten again when Astro re-ran the middleware for the error page). Astro re-runs it with the original request, so the re-entry is recognised by the error route's pattern with the locals already set: the error page renders once, with the visitor's locale.
+- `localizedPath` treats `\` as a segment separator (`@edgekits/i18n-core`), and the README's canonical/hreflang recipe appends to `Astro.url.origin` instead of resolving against `Astro.site`: a request for `/%5Cevil.com/` no longer yields an off-site canonical.
 - Server islands in `'prefix-except-default'` were redirected to a trailing-slash URL and their HTML replaced by the soft 404.
 - `/.well-known/…` URLs were treated as pages.
 

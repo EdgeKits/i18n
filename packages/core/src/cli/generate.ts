@@ -162,17 +162,13 @@ function scalarType(value: unknown): string {
 }
 
 /**
- * The TS type of one JSON value. Objects become object types; arrays become `<scalar>[]`
- * (`string[]` when empty) or `Array<…>`, the union of their elements' distinct types
- * (objects, nested arrays); a leaf is `string`, `number` or `boolean`. `keyPath` and
- * `file` name the value in the error a mixed array or a null raises.
+ * Throws, naming the key path (with element indexes) and the file, on what the schema
+ * cannot type: a null, or an array that mixes kinds of elements (strings and objects).
  */
-function generateSchemaTs(value: unknown, indent: number, keyPath: string, file: string): string {
+function assertTypeable(value: unknown, keyPath: string, file: string): void {
   if (value === null) throw nullValueError(keyPath, file)
 
   if (Array.isArray(value)) {
-    if (value.length === 0) return 'string[]'
-
     const nullAt = value.indexOf(null)
     if (nullAt !== -1) throw nullValueError(`${keyPath}[${nullAt}]`, file)
 
@@ -183,27 +179,72 @@ function generateSchemaTs(value: unknown, indent: number, keyPath: string, file:
           'I18n.Schema cannot type it. Use one kind of element per array.',
       )
     }
-
-    const first = value[0]
-    if (!isTree(first) && !Array.isArray(first)) return `${scalarType(first)}[]`
-    // Identical shapes collapse, so a list of one shape keeps the plain `Array<{…}>`.
-    const elementTypes = new Set(value.map((element, i) => generateSchemaTs(element, indent, `${keyPath}[${i}]`, file)))
-    return `Array<${[...elementTypes].join(' | ')}>`
+    value.forEach((element, i) => assertTypeable(element, `${keyPath}[${i}]`, file))
+  } else if (isTree(value)) {
+    for (const [key, child] of Object.entries(value)) assertTypeable(child, `${keyPath}.${key}`, file)
   }
+}
 
-  if (!isTree(value)) return scalarType(value)
+/**
+ * The TS type of the values found at one place in the tree (one value, or the same key
+ * across the elements of an array), checked by assertTypeable first. Objects merge into one
+ * object type, arrays into one array type, and the distinct kinds that remain form a union
+ * (`string | number` for a key that is a string in one element and a number in another).
+ */
+function typeOfValues(values: readonly unknown[], indent: number): string {
+  const objects = values.filter(isTree)
+  const arrays = values.filter(Array.isArray)
+  const scalars = [...new Set(values.filter((value) => !isTree(value) && !Array.isArray(value)).map(scalarType))]
 
-  const entries = Object.entries(value)
-  if (entries.length === 0) return '{}'
+  return [
+    ...(objects.length > 0 ? [objectType(objects, indent)] : []),
+    ...(arrays.length > 0 ? [arrayType(arrays, indent)] : []),
+    ...scalars,
+  ].join(' | ')
+}
+
+/**
+ * One object type for a list of objects (one object, or every element of an array): each
+ * key in first-seen order, required when every object has it, optional (`?:`) otherwise,
+ * typed by typeOfValues over the objects that have it.
+ */
+function objectType(objects: readonly TranslationTree[], indent: number): string {
+  const keys = [...new Set(objects.flatMap((object) => Object.keys(object)))]
+  if (keys.length === 0) return '{}'
 
   const pad = ' '.repeat(indent)
   const padInner = ' '.repeat(indent + 2)
-  const lines = entries.map(
-    ([key, child]) =>
-      `${padInner}${JSON.stringify(key)}: ${generateSchemaTs(child, indent + 2, `${keyPath}.${key}`, file)}`,
-  )
+  const lines = keys.map((key) => {
+    const present = objects.filter((object) => Object.hasOwn(object, key))
+    const optional = present.length < objects.length ? '?' : ''
+    return `${padInner}${JSON.stringify(key)}${optional}: ${typeOfValues(
+      present.map((object) => object[key]),
+      indent + 2,
+    )}`
+  })
 
   return `{\n${lines.join(';\n')};\n${pad}}`
+}
+
+/**
+ * One array type for a list of arrays (one array, or the same key's arrays across the
+ * elements of an outer one): the elements of all of them typed together. `string[]` when
+ * they are all empty, `<scalar>[]` for one scalar kind, `Array<…>` otherwise.
+ */
+function arrayType(arrays: readonly unknown[][], indent: number): string {
+  const elements = arrays.flat(1)
+  if (elements.length === 0) return 'string[]'
+
+  const elementType = typeOfValues(elements, indent)
+  return elements.every((element) => !isTree(element) && !Array.isArray(element)) && !elementType.includes('|')
+    ? `${elementType}[]`
+    : `Array<${elementType}>`
+}
+
+/** The TS type of one namespace's JSON (see typeOfValues). */
+function generateSchemaTs(value: unknown, indent: number, keyPath: string, file: string): string {
+  assertTypeable(value, keyPath, file)
+  return typeOfValues([value], indent)
 }
 
 /**

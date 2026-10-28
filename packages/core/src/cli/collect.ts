@@ -3,11 +3,16 @@ import path from 'node:path'
 
 import type { CollectedData, TranslationTree } from './generate.ts'
 
+// Code point order: the same on every machine, whatever the file system lists first.
+const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
 /**
  * Read `<localesDir>/<locale>/<namespace>.json` into the collected tree. A locale is a
  * folder of `localesDir` with at least one JSON file directly in it; JSON files in its
- * subfolders are not read and come back in `ignored`. Throws, naming the file through
- * `display`, on a file that is empty or not JSON (a leading BOM is stripped first).
+ * subfolders are not read and come back in `ignored`. Locales and namespaces are inserted
+ * sorted by code point, so the generated files and the KV bulk data come out the same on
+ * every machine. Throws, naming the file through `display`, on a file that is empty or not
+ * JSON (a leading BOM is stripped first).
  */
 export function collectTranslations(
   localesDir: string,
@@ -20,11 +25,16 @@ export function collectTranslations(
     .readdirSync(localesDir, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
+    .sort(byCodePoint)
 
   for (const locale of localeDirs) {
     const localeDir = path.join(localesDir, locale)
+    // Namespace names (not file names: `a-b.json` sorts before `a.json`, `a` before `a-b`).
+    const entries = fs
+      .readdirSync(localeDir, { withFileTypes: true, recursive: true })
+      .sort((a, b) => byCodePoint(path.basename(a.name, '.json'), path.basename(b.name, '.json')))
 
-    for (const entry of fs.readdirSync(localeDir, { withFileTypes: true, recursive: true })) {
+    for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) continue
 
       const file = path.join(entry.parentPath, entry.name)

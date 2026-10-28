@@ -39,7 +39,8 @@ stop and print the open questions.
 2. An existing Astro + `@astrojs/cloudflare` project? Without one (the skill scaffolds
    nothing; the package is Workers- and KV-specific), say so and stop.
 3. Markdown endpoints (`/blog/x.md`, `llms.txt` twins)? In which locale? That is
-   `markdownLocale`; without it `.md` paths pass through.
+   `markdownLocale`; without it `.md` paths pass through (root mode: a locale-less one is the
+   default locale's).
 4. Should the visitor's country pick the locale when nothing else matches? Which countries,
    to which locale? That is `countryToLocale`; without it geo is skipped.
 5. Middleware: `auto` (the integration registers it) or `manual` (in the project's own
@@ -65,8 +66,8 @@ Defaults when the user says they do not care: `missingTranslationBanner: true`, 
    answers; no `countryCode` without flags); Add the integration; Write translations;
    Generate and seed.
 3. Route layout, in both modes: every page moves under `src/pages/[lang]/`, same path
-   (`about.astro` → `[lang]/about.astro`); no root `index.astro` (`'prefix'`: the middleware
-   redirects `/`; root mode: it renders the default locale there by an internal rewrite).
+   (`about.astro` → `[lang]/about.astro`); no root `index.astro` (`'prefix'` redirects `/`;
+   root mode renders the default locale there by an internal rewrite).
    Non-localized endpoints (`robots.txt`, `sitemap`, `/api/*`) and `public/` stay at the
    root. Layouts set `<html lang>` from `Astro.locals.uiLocale` via `toIetfTag`. Code:
    `references/seo.md` → Route layout.
@@ -77,8 +78,8 @@ Defaults when the user says they do not care: `missingTranslationBanner: true`, 
 Starter files: copy `assets/locales/common.json` and `messages.json` into `locales/<default>/`
 and translate per locale (`messages.json`: banner texts, form error codes).
 
-`wrangler kv namespace create` touches the user's Cloudflare account: ask before running it.
-Until then, local dev takes any 32-character hex id.
+`wrangler kv namespace create` touches the user's Cloudflare account: ask first. Until then,
+local dev takes any 32-character hex id.
 
 ### A2. Generated files and the purge baseline
 
@@ -86,8 +87,8 @@ Until then, local dev takes any 32-character hex id.
   and `<generatedDir>/fallbacks.generated.ts`. Commit them; rerun the CLI after every JSON edit.
 - `.i18n-hashes.json` is written only by a successful `migrate` and records what production KV
   holds. Commit it right after each `migrate`. `seed` never touches it. `migrate` refuses to run
-  while it has uncommitted changes; do not "fix" that by editing or deleting the file: ask the
-  user which command last wrote it.
+  while its entry for that KV namespace differs from HEAD; do not "fix" that by editing or
+  deleting the file: ask the user which command last wrote it.
 
 ### A3. Verify
 
@@ -106,19 +107,17 @@ Two invariants, whatever the field kit:
 2. **Island-free client.** A `.astro` form plus an inline `<script>` wiring the vanilla
    `enhanceForm` controller, no hydration directive. No zod in the browser (its JIT
    breaks a no-`'unsafe-eval'` CSP): the client validates with a
-   hand-rolled mirror of the server schema. This is the default, not a ban: if the user asks
-   for React, a form library or any framework, use it, keep errors as codes and zod out of
-   the browser.
+   hand-rolled mirror of the server schema. The default, not a ban: if the user asks for React
+   or a form library, use it; keep errors as codes and zod out of the browser.
 
 Verify with `references/checklists.md` → "Verify: localized form".
 
 ## SEO, the switcher and the banner
 
-Read `references/seo.md`: `t` in pages and components, `fmt`, `pluralIcu`, the headless
-`LanguageSwitcher` and `MissingTranslationBanner`,
-`<html lang>` with `toIetfTag`, a `SeoHreflangs` component, sitemap, RSS, `llms.txt` and
-`robots.txt`: project code the agent writes with the package's `SUPPORTED_LOCALES`,
-`DEFAULT_LOCALE`, `localizedPath` (the one helper that knows the mode) and `toIetfTag`. Never
+Read `references/seo.md` (`t`, `fmt`, `pluralIcu`, the headless `LanguageSwitcher` and
+`MissingTranslationBanner`, `<html lang>`, `SeoHreflangs`, sitemap, RSS, `llms.txt`,
+`robots.txt`): project code on `SUPPORTED_LOCALES`, `DEFAULT_LOCALE`, `localizedPath` (the one
+helper that knows the mode) and `toIetfTag`. Never
 build canonical or hreflang from `Astro.url.pathname` directly: in the root mode it is the
 rewritten path.
 
@@ -131,6 +130,7 @@ rewritten path.
 - The default locale's JSON is the schema: a key only in another locale is not typed; add it
   to the default locale first.
 - Generated files are produced by the CLI, never edited by hand.
+- Ask before every `migrate`: it writes production KV, deletes keys, purges the cache.
 - Secrets (`.dev.vars`, `.env*`, API tokens) never enter git: run `git check-ignore <file>`
   before writing one; stage files by name, never `git add -A`.
 - Never import `@edgekits/astro-i18n/runtime` (or `/middleware`) from a module Node loads:

@@ -23,7 +23,9 @@ npm install @edgekits/tanstack-i18n @edgekits/i18n-core
 
 Requires Node `>=22.23.4`. Peers: `hono` 4 and `react` 19. Write `edgekits-i18n.config.ts` and `locales/<locale>/<namespace>.json`
 as the [core README](https://github.com/EdgeKits/i18n/tree/main/packages/core#readme)
-describes, bind the `TRANSLATIONS` KV namespace in `wrangler.jsonc`, then generate and seed:
+describes, bind the `TRANSLATIONS` KV namespace in `wrangler.jsonc`, then generate and seed.
+The CLI runs the Worker's own wrangler, found from the directory of that `wrangler.jsonc`:
+install it in the Worker's package (`npm i -D wrangler`, `^4.152.0`); a global one is never used.
 
 ```sh
 npx edgekits-i18n seed
@@ -85,11 +87,19 @@ export default app
 Hand `c.req.raw` to TanStack unchanged: server functions live under `/_serverFn/`, and that
 path is case-sensitive.
 
+The same URL renders in whichever locale the cookie, the preference or `Accept-Language`
+chose, so after `next()` the middleware adds `Vary: Cookie, Accept-Language` to every HTML
+response (merged with a `Vary` it already has). Cloudflare's cache does not store a Worker's
+HTML by default; a cache rule that does must bypass requests with the lang cookie (or key on
+it) and on `Accept-Language`.
+
 A `userPreference` that throws or rejects counts as no preference: the request resolves through
 Accept-Language, and the error is logged once with `console.warn` (whatever `DEBUG_I18N` says: a
 failing hook is an application error). To report it your own way, pass
 `onUserPreferenceError: (error, request) => …` next to `userPreference`, to the middleware and
-to the loader alike; it is called once per failure, instead of the warning.
+to the loader alike; it is called once per failure, instead of the warning. The hook runs once
+per `Request`: the middleware and every loader of one request (the SSR document's server
+function gets the same `Request`) share its answer, so a failure is reported once.
 
 ## 3. The server function: `src/i18n/server.ts`
 
@@ -222,7 +232,8 @@ Headless: a trigger button and one item per language (the label carries `lang`, 
 `aria-current`), class names only from `classes` (slots `root`, `trigger`, `triggerIcon`,
 `dropdown`, `item`, `itemActive`, `itemLabel`), `data-ls-*` and `data-open` hooks for styling, no
 styles. Escape and a click outside close it. Choosing a language writes the lang cookie
-(`path=/`, `max-age` from `cookie.maxAge`, `SameSite=Lax; Secure`), then calls `afterChange`,
+(`path=/`, `max-age` from `cookie.maxAge`, `SameSite=Lax`, and `Secure` on an https page), then
+calls `afterChange`,
 or reloads the page without one; `router.invalidate()` re-runs the loaders in place. With one
 language it renders nothing.
 
@@ -242,7 +253,9 @@ declare module '@edgekits/i18n-core' {
 }
 ```
 
-`c.var.locale` is typed from the instance either way.
+`c.var.locale` has the type you give `I18nVariables` in the app's Hono generic: `I18nVariables`
+alone is `Locale` (`string`, or the union this declaration lists), and
+`I18nVariables<'en' | 'de' | 'es'>` names the locales directly.
 
 ## Monorepo
 

@@ -96,13 +96,14 @@ function isFlatBaseline(file: Record<string, unknown>): boolean {
 
 /**
  * The baseline of KV namespace `kvId` in a parsed `.i18n-hashes.json` (`undefined`: no
- * file). A file in the old flat shape is the baseline of whatever `kvId` is asked for. With
- * no `kvId` (bundle, which reads no wrangler config) the only baseline the file holds, or
- * `undefined` when it holds several.
+ * file). A file in the old flat shape is the baseline of `flatOwner`, the top-level
+ * TRANSLATIONS id (0.2.x wrote it, and had no `--env`); another `kvId` gets none (`{}`).
+ * Without a `flatOwner` it is `kvId`'s. With no `kvId` (bundle, which reads no wrangler
+ * config) the only baseline the file holds, or `undefined` when it holds several.
  */
-export function readBaseline(file: unknown, kvId?: string): HashMap | undefined {
+export function readBaseline(file: unknown, kvId?: string, flatOwner?: string): HashMap | undefined {
   if (!isRecord(file)) return {}
-  if (isFlatBaseline(file)) return file as HashMap
+  if (isFlatBaseline(file)) return kvId === undefined || kvId === (flatOwner ?? kvId) ? (file as HashMap) : {}
 
   const baselines = file as BaselineFile
   if (kvId !== undefined) return baselines[kvId] ?? {}
@@ -112,8 +113,16 @@ export function readBaseline(file: unknown, kvId?: string): HashMap | undefined 
   return ids.length === 1 ? baselines[ids[0]!] : {}
 }
 
-/** The file with `kvId`'s baseline replaced; an old flat file becomes `{ [kvId]: hashes }`. */
-export function writeBaseline(file: unknown, kvId: string, hashes: HashMap): BaselineFile {
-  if (!isRecord(file) || isFlatBaseline(file)) return { [kvId]: hashes }
+/**
+ * The file with `kvId`'s baseline replaced. An old flat file stays the baseline of its
+ * owner (`flatOwner`, see readBaseline): `{ [kvId]: hashes }` when that is `kvId`,
+ * `{ [flatOwner]: flat, [kvId]: hashes }` otherwise.
+ */
+export function writeBaseline(file: unknown, kvId: string, hashes: HashMap, flatOwner?: string): BaselineFile {
+  if (!isRecord(file)) return { [kvId]: hashes }
+  if (isFlatBaseline(file)) {
+    const owner = flatOwner ?? kvId
+    return owner === kvId ? { [kvId]: hashes } : { [owner]: file as HashMap, [kvId]: hashes }
+  }
   return { ...(file as BaselineFile), [kvId]: hashes }
 }

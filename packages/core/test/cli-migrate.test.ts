@@ -500,7 +500,7 @@ test('a deleted translation file: its KV key is bulk-deleted and its cache URL p
   })
 })
 
-test('the baseline: an old flat file is the current namespace baseline, rewritten per KV id', () => {
+test('the baseline: an old flat file is the top-level namespace baseline, rewritten per KV id', () => {
   inProject({ files: { '.i18n-hashes.json': JSON.stringify(HASHES) } }, (root) => {
     const run = cli(root, ['migrate', '--purge-delay', '0'])
     assert.equal(run.status, 0, run.stderr)
@@ -535,4 +535,186 @@ test('a translation file that is not JSON, or empty: exit 1 naming <localesDir>/
       assert.ok(!existsSync(path.join(root, 'i18n-data.json')))
     })
   }
+})
+
+// ---------------------------------------------------------------------------
+// Pre-tag fixes (0.3.0): baseline per env, strict arguments, purge-all, shape checks.
+// ---------------------------------------------------------------------------
+
+const PRICING = { 'en:pricing': '000000000000' }
+
+test('the baseline: an old flat file belongs to the top-level id; staging first, then production', () => {
+  // 0.2.x production wrote a flat file; pricing has been deleted since.
+  const flat = { ...HASHES, ...PRICING }
+  inProject({ wrangler: WITH_ENVS, files: { '.i18n-hashes.json': JSON.stringify(flat) } }, (root) => {
+    const staging = cli(root, ['migrate', '--env', 'staging', '--purge-delay', '0'])
+    assert.equal(staging.status, 0, staging.stderr)
+    assert.equal(readJson<WranglerCall[]>(root, 'wrangler-calls.json').length, 1, 'staging deletes nothing')
+    assert.deepEqual(readJson(root, '.i18n-hashes.json'), { [KV_ID]: flat, [STAGING_KV]: HASHES })
+
+    const production = cli(root, ['migrate', '--purge-delay', '0'])
+    assert.equal(production.status, 0, production.stderr)
+    const [, , del] = readJson<WranglerCall[]>(root, 'wrangler-calls.json')
+    assert.deepEqual(del!.argv.slice(0, 3), ['kv', 'bulk', 'delete'])
+    assert.ok(del!.argv.includes(`--namespace-id=${KV_ID}`), String(del!.argv))
+    assert.deepEqual(del!.keys, ['edgekits.dev:pricing:en'])
+    assert.deepEqual(readJson(root, '.i18n-hashes.json'), { [KV_ID]: HASHES, [STAGING_KV]: HASHES })
+  })
+})
+
+function git(root: string, args: string[]): void {
+  const run = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
+    cwd: root,
+    encoding: 'utf8',
+  })
+  assert.equal(run.status, 0, run.stderr)
+}
+
+// The fixture project as a git repository with everything committed (a fixture commit:
+// no signing, no hooks).
+function commitAll(root: string): void {
+  git(root, ['init', '-q'])
+  git(root, ['add', '-A'])
+  git(root, ['-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify', '-m', 'fixture'])
+}
+
+test('the dirty-baseline guard compares only the current KV id with HEAD: migrate --env staging && migrate', () => {
+  const baseline = { [KV_ID]: HASHES, [STAGING_KV]: { 'en:common': 'aaaaaaaaaaaa' } }
+  inProject({ wrangler: WITH_ENVS, files: { '.i18n-hashes.json': JSON.stringify(baseline) } }, (root) => {
+    commitAll(root)
+    assert.equal(cli(root, ['migrate', '--env', 'staging', '--purge-delay', '0']).status, 0)
+    const production = cli(root, ['migrate', '--purge-delay', '0'])
+    assert.equal(production.status, 0, production.stderr)
+    assert.doesNotMatch(production.stderr, /Refusing to migrate/)
+  })
+})
+
+test('the dirty-baseline guard still refuses a changed entry of the KV id it writes', () => {
+  inProject({ files: { '.i18n-hashes.json': JSON.stringify({ [KV_ID]: HASHES }) } }, (root) => {
+    commitAll(root)
+    writeFileSync(path.join(root, '.i18n-hashes.json'), JSON.stringify({ [KV_ID]: { ...HASHES, 'en:blog': 'edited' } }))
+    const run = cli(root, ['migrate', '--purge-delay', '0'])
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, new RegExp(`the baseline of KV namespace ${KV_ID} differs from the committed one`))
+    assert.ok(!existsSync(path.join(root, 'wrangler-calls.json')), 'nothing pushed')
+  })
+  // A file not yet in HEAD, with an entry for this id: refused too.
+  inProject({}, (root) => {
+    commitAll(root)
+    writeFileSync(path.join(root, '.i18n-hashes.json'), JSON.stringify({ [KV_ID]: HASHES }))
+    assert.equal(cli(root, ['migrate', '--purge-delay', '0']).status, 1)
+  })
+})
+
+test('an unknown argument exits 1 naming it, before anything is written', () => {
+  const cases: Array<[args: string[], offending: string]> = [
+    [['migrate', '-e', 'staging'], '-e'],
+    [['migrate', '--evn', 'staging'], '--evn'],
+    [['bundle', 'extra'], 'extra'],
+    [['seed', '--fallback'], '--fallback'],
+  ]
+  for (const [args, offending] of cases) {
+    inProject({}, (root) => {
+      const run = cli(root, args)
+      assert.equal(run.status, 1, args.join(' '))
+      assert.ok(run.stderr.includes(`Unknown argument "${offending}"`), run.stderr)
+      assert.ok(!existsSync(path.join(root, 'i18n-data.json')), args.join(' '))
+    })
+  }
+  inProject({}, (root) => {
+    assert.equal(cli(root, ['bundle', '--fallbacks']).status, 0)
+    assert.equal(cli(root, ['--help']).status, 0)
+  })
+})
+
+test('--env <name>: .dev.vars.<name> replaces .dev.vars when it exists, as wrangler reads them', () => {
+  const both = {
+    '.dev.vars': 'CLOUDFLARE_CACHEPURGE_API_TOKEN=base\n',
+    '.dev.vars.staging': 'CLOUDFLARE_CACHEPURGE_API_TOKEN=stage\n',
+  }
+  const tokens = (root: string) => new Set(readJson<Array<{ auth: string }>>(root, 'calls.json').map((c) => c.auth))
+  inProject({ wrangler: WITH_ENVS, files: both }, (root) => {
+    assert.equal(cli(root, ['migrate', '--env', 'staging', '--purge-delay', '0'], {}).status, 0)
+    assert.deepEqual(tokens(root), new Set(['Bearer stage']))
+  })
+  inProject({ wrangler: WITH_ENVS, files: both }, (root) => {
+    assert.equal(cli(root, ['migrate', '--purge-delay', '0'], {}).status, 0)
+    assert.deepEqual(tokens(root), new Set(['Bearer base']))
+  })
+  inProject({ wrangler: WITH_ENVS, files: { '.dev.vars': both['.dev.vars'] } }, (root) => {
+    assert.equal(cli(root, ['migrate', '--env', 'staging', '--purge-delay', '0'], {}).status, 0)
+    assert.deepEqual(tokens(root), new Set(['Bearer base']), 'no env file: .dev.vars')
+  })
+})
+
+test('--purge-all purges every namespace URL even when the baseline reports no change', () => {
+  inProject({ files: { '.i18n-hashes.json': JSON.stringify({ [KV_ID]: HASHES }) } }, (root) => {
+    const run = cli(root, ['migrate', '--purge-all', '--purge-delay', '0'])
+    assert.equal(run.status, 0, run.stderr)
+    assert.deepEqual(
+      readJson<string[][]>(root, 'purges.json').map((files) => [...files].sort()),
+      [[url('blog'), url('common')]],
+    )
+    assert.deepEqual(readJson(root, '.i18n-hashes.json'), { [KV_ID]: HASHES })
+  })
+  inProject({}, (root) => {
+    const run = cli(root, ['bundle', '--purge-all'])
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /--purge-all applies to migrate only/)
+  })
+})
+
+test('CLOUDFLARE_ZONE_ID must be 32 hex characters (wrangler vars: before anything is written)', () => {
+  const badVars = { kv_namespaces: [{ binding: 'TRANSLATIONS', id: KV_ID }], vars: { CLOUDFLARE_ZONE_ID: 'zone-1' } }
+  inProject({ wrangler: badVars }, (root) => {
+    const run = cli(root, ['migrate', '--purge-delay', '0'])
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /CLOUDFLARE_ZONE_ID "zone-1" in wrangler\.jsonc is not a zone id \(32 hex characters\)/)
+    assert.ok(!existsSync(path.join(root, 'i18n-data.json')))
+  })
+  inProject({ wrangler: { kv_namespaces: [{ binding: 'TRANSLATIONS', id: KV_ID }] } }, (root) => {
+    const run = cli(root, ['migrate', '--purge-delay', '0'], {
+      CLOUDFLARE_CACHEPURGE_API_TOKEN: 'token',
+      CLOUDFLARE_ZONE_ID: '../accounts/x',
+    })
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /is not a zone id \(32 hex characters\)/)
+    assert.match(run.stderr, /KV is updated; the edge cache is not/)
+    assert.ok(!existsSync(path.join(root, 'calls.json')), 'no API call')
+  })
+})
+
+test('--purge-delay accepts 0 to 600 seconds', () => {
+  inProject({}, (root) => {
+    for (const delay of ['601', '1e9', 'x']) {
+      const run = cli(root, ['bundle', `--purge-delay=${delay}`])
+      assert.equal(run.status, 1, delay)
+      assert.match(run.stderr, /is not a number of seconds from 0 to 600/, delay)
+    }
+    assert.equal(cli(root, ['bundle', '--purge-delay', '600']).status, 0)
+  })
+})
+
+test('two environments on one zone with different KV ids: a warning to use a per-environment keyPrefix', () => {
+  const sameZone = {
+    kv_namespaces: [{ binding: 'TRANSLATIONS', id: KV_ID }],
+    vars: { CLOUDFLARE_ZONE_ID: ZONE_ID },
+    env: {
+      staging: {
+        kv_namespaces: [{ binding: 'TRANSLATIONS', id: STAGING_KV }],
+        vars: { CLOUDFLARE_ZONE_ID: ZONE_ID },
+      },
+    },
+  }
+  inProject({ wrangler: sameZone }, (root) => {
+    for (const args of [['migrate'], ['migrate', '--env', 'staging']]) {
+      const run = cli(root, [...args, '--purge-delay', '0'])
+      assert.equal(run.status, 0, run.stderr)
+      assert.match(run.stderr, /per-environment keyPrefix/, args.join(' '))
+    }
+  })
+  inProject({ wrangler: WITH_ENVS }, (root) => {
+    const run = cli(root, ['migrate', '--env', 'staging', '--purge-delay', '0'])
+    assert.doesNotMatch(run.stderr, /per-environment keyPrefix/, 'different zones')
+  })
 })

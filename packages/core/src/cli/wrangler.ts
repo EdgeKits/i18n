@@ -51,6 +51,12 @@ export type WorkerSettings = {
   zoneId?: string
   // Without an environment: the `env.<name>` entries that bind the same name to another id.
   otherEnvs: string[]
+  // The top-level binding's `id`, whichever scope was read: a pre-0.3 flat purge baseline
+  // is its baseline (0.2.x had no `--env`).
+  topLevelKvId?: string
+  // The other scopes (`the top level`, `env.<name>`) whose binding has another id and whose
+  // `vars.CLOUDFLARE_ZONE_ID` is this scope's: with one `keyPrefix`, they share cache URLs.
+  sameZoneScopes: string[]
 }
 
 function findBinding(scope: WranglerScope | undefined, binding: string): KvNamespace | undefined {
@@ -92,7 +98,7 @@ export function readWorkerSettings(wranglerConfigPath: string, binding: string, 
     process.exit(1)
   }
 
-  const zoneId = scope.vars?.CLOUDFLARE_ZONE_ID
+  const zoneId = zoneIdOf(scope)
   const otherEnvs =
     env === undefined
       ? Object.keys(envs).filter((name) => {
@@ -101,12 +107,35 @@ export function readWorkerSettings(wranglerConfigPath: string, binding: string, 
         })
       : []
 
+  const topLevel = findBinding(config as WranglerScope, binding)
+  const scopes: Array<[string, WranglerScope | undefined]> = [
+    ['the top level', config as WranglerScope],
+    ...Object.keys(envs).map((name): [string, WranglerScope | undefined] => [`env.${name}`, envs[name]]),
+  ]
+  const sameZoneScopes =
+    zoneId === undefined
+      ? []
+      : scopes
+          .filter(([name]) => name !== (env === undefined ? 'the top level' : `env.${env}`))
+          .filter(([, other]) => {
+            const otherEntry = findBinding(other, binding)
+            return otherEntry !== undefined && otherEntry.id !== entry.id && zoneIdOf(other) === zoneId
+          })
+          .map(([name]) => name)
+
   return {
     kvId: entry.id,
     previewId: typeof entry.preview_id === 'string' ? entry.preview_id : undefined,
-    zoneId: typeof zoneId === 'string' && zoneId !== '' ? zoneId : undefined,
+    zoneId,
     otherEnvs,
+    topLevelKvId: typeof topLevel?.id === 'string' ? topLevel.id : undefined,
+    sameZoneScopes,
   }
+}
+
+function zoneIdOf(scope: WranglerScope | undefined): string | undefined {
+  const zoneId = scope?.vars?.CLOUDFLARE_ZONE_ID
+  return typeof zoneId === 'string' && zoneId !== '' ? zoneId : undefined
 }
 
 // ---------------------------------------------------------------------------

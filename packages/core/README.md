@@ -4,8 +4,11 @@ The EdgeKits edge-native i18n engine, free of any framework. Translations live a
 Workers KV, one JSON value per locale and namespace; each namespace's KV value is cached at the
 edge under its own URL (merged with the compiled fallback on every read) and purged through the
 Cloudflare Purge API only when its content changed; a namespace KV does not have is cached as
-missing for 60 seconds; the default locale's JSON files define a typed schema. After a KV error the compiled fallback is
-served and not cached, so the next request reads KV again. This package holds the config validation,
+missing for 60 seconds; the default locale's JSON files define a typed schema. Each cache entry
+carries `X-EdgeKits-I18n: v2`; a response at that URL without it is a miss, read from KV again
+and replaced. After a KV error the compiled fallback is served and not cached, so the next
+request reads KV again. Every namespace a call returns is its own copy: mutating it never
+changes the next request's text. This package holds the config validation,
 the fetcher, locale resolution, the lang cookie, the format helpers and the `edgekits-i18n`
 CLI. A framework adapter builds on it: for Astro, use
 [`@edgekits/astro-i18n`](https://github.com/EdgeKits/i18n/tree/main/packages/astro#readme),
@@ -96,18 +99,25 @@ The `edgekits-i18n` command is this package's. It reads `edgekits-i18n.config.ts
 npx edgekits-i18n seed
 ```
 
-| Flag                      | Default                     | What comes from it                                                                                                                                                                      |
-| ------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--config <path>`         | `./edgekits-i18n.config.ts` | The config. Its directory is the project root: `localesDir`, `generatedDir`, `i18n-data.json`, `src/i18n.generated.d.ts` and `.i18n-hashes.json` resolve there.                         |
-| `--wrangler <path>`       | `./wrangler.jsonc`          | The `TRANSLATIONS` KV binding and the `CLOUDFLARE_ZONE_ID` var. Its directory is the Worker root: `.dev.vars` and the project's wrangler are found there.                               |
-| `--env <name>`            | none (the top level)        | The `TRANSLATIONS` binding and `CLOUDFLARE_ZONE_ID` from `env.<name>` of the wrangler config (wrangler does not inherit them into an environment); wrangler itself gets `--env <name>`. |
-| `--purge-delay <seconds>` | `65`                        | `migrate`: the wait between its two purges (below). `0` purges once.                                                                                                                    |
+| Flag                      | Default                     | What comes from it                                                                                                                                                                                                                                                          |
+| ------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--config <path>`         | `./edgekits-i18n.config.ts` | The config. Its directory is the project root: `localesDir`, `generatedDir`, `i18n-data.json`, `src/i18n.generated.d.ts` and `.i18n-hashes.json` resolve there.                                                                                                             |
+| `--wrangler <path>`       | `./wrangler.jsonc`          | The `TRANSLATIONS` KV binding and the `CLOUDFLARE_ZONE_ID` var. Its directory is the Worker root: `.dev.vars` and the project's wrangler are found there.                                                                                                                   |
+| `--env <name>`            | none (the top level)        | The `TRANSLATIONS` binding and `CLOUDFLARE_ZONE_ID` from `env.<name>` of the wrangler config (wrangler does not inherit them into an environment); wrangler itself gets `--env <name>`; `.dev.vars.<name>` is read instead of `.dev.vars` when it exists, as wrangler does. |
+| `--purge-delay <seconds>` | `65`                        | `migrate`: the wait between its two purges (below), `0` to `600`. `0` purges once.                                                                                                                                                                                          |
+| `--purge-all`             | off                         | `migrate`: purge every namespace's cache URLs, changed or not (after a `git revert` of translations, below).                                                                                                                                                                |
+| `--fallbacks`             | off                         | `bundle`: also write `<generatedDir>/fallbacks.generated.ts`.                                                                                                                                                                                                               |
 
 The paths resolve against the current directory, and a flag may come before or after the
 command. The CLI always runs wrangler with `--config` set to that file, from its directory, so
 local KV state lands in the `.wrangler/state/` that `wrangler dev` there reads. Without `--env`,
 when an `env.<name>` binds `TRANSLATIONS` to another id, the CLI warns once, naming those
-environments.
+environments. Any other argument (`-e staging`, a second command) exits `1`, naming it.
+
+Two environments on one zone that bind different KV namespaces share cache URLs when they share
+the `keyPrefix`: each `migrate` would purge, and each Worker cache, the other's entries. Give
+each environment its own `keyPrefix` (a config per environment, `--config`); `migrate` warns
+when the wrangler config puts two such environments on one `CLOUDFLARE_ZONE_ID`.
 
 | Command                            | Writes                                                                                                              | Then                                                                                                                                                    |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -117,10 +127,13 @@ environments.
 | `edgekits-i18n migrate`            | the same as `bundle --fallbacks`                                                                                    | pushes to remote KV, deletes the keys of removed files, purges the changed and removed namespaces' edge-cache entries twice, writes `.i18n-hashes.json` |
 
 `seed` writes the `TRANSLATIONS` binding's `preview_id` when it has one (the namespace
-`wrangler dev` reads), otherwise its `id`; `migrate` always writes the `id`.
+`wrangler dev` reads), otherwise its `id`; `migrate` always writes the `id`. `seed` only adds
+and overwrites: after you delete a translation file, wipe `.wrangler/state` (or delete the key
+with `wrangler kv key delete --local`) so local KV stops serving it.
 
 The generated files are ordinary project files: commit them, and run the CLI again after you
-edit a JSON file.
+edit a JSON file. Locales and namespaces are read in code point order, so the files come out
+the same on every machine.
 
 A namespace is the file name under `<localesDir>/<locale>/`: segments of lowercase letters,
 digits and underscores, joined by single dots, so `locales/en/app.billing.json` is the
@@ -132,12 +145,15 @@ The files are read as JSON (a leading BOM is ignored). A file that is empty or n
 `null` value anywhere (it would replace the default locale's text with `null`), stops the run
 with the file and key path; JSON files in subfolders of a locale folder are ignored with a
 warning. In `I18n.Schema`, leaves are `string`, `number` or `boolean` as in the default locale's
-JSON, and a list of objects is the union of its element shapes. The CLI warns about a namespace
+JSON; a list of objects is one object type merged from its elements: a key every element has is
+required, any other optional (`?:`), and a key whose type differs between elements a union. A
+list that mixes kinds of elements (strings and objects) stops the run, naming the key path and
+the file, as a `null` does. The CLI warns about a namespace
 that only non-default locales have, and about keys a locale has that the default locale lacks
 (neither is typed).
 
-`keyPrefix` must be a URL host as written: lowercase, no scheme, path or space (`example.com`,
-`my-site`). It is the host of every edge-cache URL, so `defineI18nConfig` rejects anything else.
+`keyPrefix` must be a URL host as written: lowercase, no scheme, path or space: the project's
+own domain (`www.my-site.com`) or a dotless name (`my-site`), never a host you do not own. It is the host of every edge-cache URL, so `defineI18nConfig` rejects anything else.
 
 `.i18n-hashes.json` holds, per KV namespace id, one content hash per namespace and locale as of
 the last successful `migrate` against that namespace:
@@ -147,17 +163,22 @@ the last successful `migrate` against that namespace:
 ```
 
 The next `migrate` purges exactly the entries whose hash changed. A file in the pre-0.3 flat
-shape (`{ "en:common": "…" }`) is read as the baseline of the namespace the next `migrate`
-writes, and rewritten in the new shape: run that first `migrate` against the namespace the file
-describes (production). Rules:
+shape (`{ "en:common": "…" }`) is what 0.2.x wrote for the top-level `TRANSLATIONS` id: it is
+that id's baseline whichever environment migrates first, and it stays that id's when another id
+is written next to it. Rules:
 
 - Only `migrate` writes it, and only after both purges succeeded (or nothing changed). `seed`
   never touches it: local KV is not remote KV.
 - Commit it after every `migrate`. It is the record of what each remote namespace holds; with
   `--env`, staging and production keep separate baselines in the one file.
-- `migrate` refuses to run while the file has uncommitted changes, since a wrong baseline would
-  skip purges silently. When that git check cannot run (no `git` on the PATH, or not a git work
-  tree), `migrate` warns and proceeds without the purge-baseline check.
+- `migrate` refuses to run while the baseline of the KV namespace it writes differs from the
+  one in the committed file (`git show HEAD:.i18n-hashes.json`), since a wrong baseline would
+  skip purges silently. Only that namespace's entry counts, so `migrate --env staging &&
+migrate` in one job works. When the git check cannot run (no `git` on the PATH, or not a git
+  work tree), `migrate` warns and proceeds without it.
+- A `git revert` of translations reverts the baseline with them, so the next `migrate` sees no
+  change and purges nothing while the edge still holds the reverted text. Run
+  `migrate --purge-all`: it purges every namespace's URLs whatever the baseline says.
 
 A translation file removed since the last `migrate` (a `de/pricing.json` in the baseline but no
 longer on disk): `migrate` lists its KV key, deletes it (`wrangler kv bulk delete --force`, the
@@ -170,11 +191,14 @@ would cache the old value again for a year.
 `migrate` reads the zone ID from `CLOUDFLARE_ZONE_ID` (a var in `wrangler.jsonc`, or in
 `env.<name>` with `--env`, or the environment) and the token from
 `CLOUDFLARE_CACHEPURGE_API_TOKEN` (the environment or `.dev.vars`, read with dotenv syntax:
-quotes, `export ` and `#` comments).
+quotes, `export ` and `#` comments; with `--env <name>`, `.dev.vars.<name>` when it exists). The
+zone ID must be 32 hex characters: from the wrangler config it is checked before anything is
+written, from the environment at the purge.
 
 Exit status: `0` on success, `1` on any error. `migrate` also exits `1` after the KV push when
-the edge cache was not purged: no zone ID or token, or a failed purge (either round). The
-message says so, `.i18n-hashes.json` is left alone, and the next run retries the same purge.
+the edge cache was not purged: no zone ID or token (or a malformed zone ID), a failed delete of
+the removed files' keys, or a failed purge (either round). The message says so,
+`.i18n-hashes.json` is left alone, and the next run retries the same deletions and purge.
 
 ### Monorepo: one translations folder, several Workers
 

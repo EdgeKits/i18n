@@ -25,6 +25,7 @@ import {
   purgeUrlsFor,
   readBaseline,
   removedKeys,
+  stableStringify,
   writeBaseline,
   type HashMap,
 } from './hashes.ts'
@@ -35,9 +36,11 @@ import { checkKeyPrefixZone } from './zone.ts'
 
 // KV can take up to 60 s to show a write in other locations; the second purge comes after.
 const DEFAULT_PURGE_DELAY_S = 65
+// Ten minutes: far past KV's settling time, and well inside setTimeout's range.
+const MAX_PURGE_DELAY_S = 600
 
 const HELP = `Usage: edgekits-i18n <command> [--fallbacks] [--config <path>] [--wrangler <path>]
-                     [--env <name>] [--purge-delay <seconds>]
+                     [--env <name>] [--purge-delay <seconds>] [--purge-all]
 
 Reads ${CONFIG_FILE} and <localesDir>/<locale>/<namespace>.json from the config's directory.
 
@@ -49,8 +52,8 @@ Commands:
             .i18n-hashes.json is left untouched: it records remote KV, not local.
   migrate   bundle + fallbacks, then push to remote KV, delete the keys of removed translation
             files, purge the changed edge-cache entries, wait --purge-delay seconds, purge them
-            again, and write .i18n-hashes.json. Refuses to run while .i18n-hashes.json has
-            uncommitted changes.
+            again, and write .i18n-hashes.json. Refuses to run while the baseline of the KV
+            namespace it writes differs from the one committed in .i18n-hashes.json.
 
 Options:
   --config <path>          The config to load (default: ./${CONFIG_FILE}). Its directory
@@ -59,10 +62,13 @@ Options:
                            binding and CLOUDFLARE_ZONE_ID; .dev.vars and the wrangler binary come from
                            its directory.
   --env <name>             Read the TRANSLATIONS binding and CLOUDFLARE_ZONE_ID from env.<name> of the
-                           wrangler config (wrangler does not inherit them), and pass --env to wrangler.
-  --purge-delay <seconds>  migrate: the wait between the two purges (default ${DEFAULT_PURGE_DELAY_S}). KV can take
-                           up to 60 s to show a write in other locations, and a read there in that window
+                           wrangler config (wrangler does not inherit them), pass --env to wrangler, and
+                           read .dev.vars.<name> instead of .dev.vars when it exists (as wrangler does).
+  --purge-delay <seconds>  migrate: the wait between the two purges (default ${DEFAULT_PURGE_DELAY_S}, at most ${MAX_PURGE_DELAY_S}). KV can
+                           take up to 60 s to show a write in other locations, and a read there in that window
                            re-caches the old value. 0 purges once.
+  --purge-all              migrate: purge every namespace's cache URLs, changed or not. For after a
+                           git revert of translations, which reverts .i18n-hashes.json with them.
 
 Exit status: 0 on success, 1 on an error. migrate also exits 1 when KV was updated but the edge
 cache was not purged (no CLOUDFLARE_ZONE_ID or token, a failed purge); .i18n-hashes.json is then
@@ -75,6 +81,11 @@ Worker config (every app binds the same KV namespace and zone), from the reposit
 
 const COMMANDS = ['bundle', 'seed', 'migrate'] as const
 type Command = (typeof COMMANDS)[number]
+
+// The flags that take no value. Anything else that is neither the command nor a value flag
+// stops the run: a mistyped flag (`-e staging`) must not run migrate against the default
+// environment.
+const BOOLEAN_FLAGS = ['--fallbacks', '--purge-all', '--help', '-h'] as const
 
 // The flags that take a value; each is removed from argv, with its value, before the
 // command is looked for.
@@ -109,9 +120,13 @@ type Options = {
   env?: string
   // `--purge-delay`, in seconds.
   purgeDelay: number
+  // `--purge-all`: purge every namespace's URLs, whatever the baseline says.
+  purgeAll: boolean
 }
 
 const KV_NAMESPACE_ID = /^[0-9a-f]{32}$/i
+// A zone id reaches the Purge API's URL path next to the token: only a real id's shape.
+const ZONE_ID = /^[0-9a-f]{32}$/i
 
 // An environment name reaches wrangler's argv: only the characters wrangler's own names use.
 const ENV_NAME = /^[A-Za-z0-9_-]+$/
@@ -138,7 +153,21 @@ async function main(argv: string[]): Promise<void> {
     process.exit(1)
   }
 
-  await run(command as Command, args, resolvePaths(flags), resolveOptions(flags))
+  const unknown = args.find((arg, i) =>
+    arg.startsWith('-') ? !(BOOLEAN_FLAGS as readonly string[]).includes(arg) : i !== args.indexOf(command),
+  )
+  if (unknown !== undefined) {
+    console.error(`[i18n] Unknown argument "${unknown}". Run edgekits-i18n --help for the options.`)
+    process.exit(1)
+  }
+
+  const purgeAll = args.includes('--purge-all')
+  if (purgeAll && command !== 'migrate') {
+    console.error('[i18n] --purge-all applies to migrate only.')
+    process.exit(1)
+  }
+
+  await run(command as Command, args, resolvePaths(flags), { ...resolveOptions(flags), purgeAll })
 }
 
 /** Takes the value flags (`--config <path>`, or `--config=<path>`, …) out of argv. */
@@ -197,7 +226,7 @@ function resolvePaths(flags: Partial<Record<ValueFlag, string>>): Paths {
   }
 }
 
-function resolveOptions(flags: Partial<Record<ValueFlag, string>>): Options {
+function resolveOptions(flags: Partial<Record<ValueFlag, string>>): Omit<Options, 'purgeAll'> {
   const env = flags['--env']
   if (env !== undefined && !ENV_NAME.test(env)) {
     console.error(`[i18n] --env "${env}" is not an environment name (letters, digits, "-" and "_").`)
@@ -206,8 +235,8 @@ function resolveOptions(flags: Partial<Record<ValueFlag, string>>): Options {
 
   const delay = flags['--purge-delay']
   const purgeDelay = delay === undefined ? DEFAULT_PURGE_DELAY_S : Number(delay)
-  if (!Number.isFinite(purgeDelay) || purgeDelay < 0) {
-    console.error(`[i18n] --purge-delay "${delay}" is not a number of seconds (0 or more).`)
+  if (!Number.isFinite(purgeDelay) || purgeDelay < 0 || purgeDelay > MAX_PURGE_DELAY_S) {
+    console.error(`[i18n] --purge-delay "${delay}" is not a number of seconds from 0 to ${MAX_PURGE_DELAY_S}.`)
     process.exit(1)
   }
 
@@ -233,10 +262,6 @@ async function run(command: Command, args: string[], paths: Paths, options: Opti
   const isLocal = command === 'seed'
   const shouldGenerateFallbacks =
     shouldDeploy || args.includes('--fallbacks') || process.env.I18N_GENERATE_FALLBACKS === 'true'
-
-  if (command === 'migrate') {
-    assertCleanPurgeBaseline(paths)
-  }
 
   const config = await loadI18nConfig(paths.config)
   const defaultLocale = config.defaultLocale
@@ -266,6 +291,28 @@ async function run(command: Command, args: string[], paths: Paths, options: Opti
         `${worker.otherEnvs.map((name) => `env.${name}`).join(', ')}; this run uses the top-level binding. ` +
         'Pass --env <name> to target one of those environments.',
     )
+  }
+
+  // Two KV namespaces behind one zone and one keyPrefix: their entries share cache URLs, so
+  // each migrate purges, and each Worker caches, the other's.
+  if (worker && worker.sameZoneScopes.length > 0) {
+    console.warn(
+      `[i18n] ⚠️  ${worker.sameZoneScopes.join(', ')} of ${shown(paths.wranglerConfig)} uses the same ` +
+        `CLOUDFLARE_ZONE_ID with another ${KV_BINDING} namespace: with one keyPrefix both cache translations ` +
+        'under the same URLs. Use a per-environment keyPrefix (a config per environment).',
+    )
+  }
+
+  // A zone id from the wrangler config is checked before anything is written; one from the
+  // environment or .dev.vars, at the purge.
+  if (worker?.zoneId !== undefined && !isLocal && !ZONE_ID.test(worker.zoneId)) {
+    fail(
+      `CLOUDFLARE_ZONE_ID "${worker.zoneId}" in ${shown(paths.wranglerConfig)} is not a zone id (32 hex characters).`,
+    )
+  }
+
+  if (command === 'migrate') {
+    assertCleanPurgeBaseline(paths, worker!.kvId, worker!.topLevelKvId)
   }
 
   // The Worker's wrangler, found before anything is written.
@@ -338,7 +385,7 @@ async function run(command: Command, args: string[], paths: Paths, options: Opti
 
   // The baseline of the KV namespace migrate writes; bundle reads no wrangler config and
   // gets one only when the file holds a single baseline.
-  const previousHashes = readBaseline(baselineFile, worker?.kvId)
+  const previousHashes = readBaseline(baselineFile, worker?.kvId, worker?.topLevelKvId)
   const { currentHashes, changedKeys } = diffHashes(collected, previousHashes ?? {})
   const removed = previousHashes ? removedKeys(previousHashes, currentHashes) : []
 
@@ -545,7 +592,12 @@ async function deploy({
   //   migrate` sees the same diff and re-attempts the invalidation.
   // ---------------------------------------------------------------------------
 
-  const purgeKeys = [...changedKeys, ...removed]
+  // `--purge-all`: every current namespace, changed or not (a reverted baseline reports no
+  // change for a rollback), plus the removed ones.
+  const purgeKeys = options.purgeAll ? [...Object.keys(currentHashes), ...removed] : [...changedKeys, ...removed]
+  if (options.purgeAll) {
+    console.log(`[i18n] --purge-all: purging all ${purgeKeys.length} namespace URL(s), changed or not.`)
+  }
 
   if (purgeKeys.length === 0) {
     // Nothing changed — nothing to purge, safe to update hashes.
@@ -559,13 +611,14 @@ async function deploy({
         '       The bulk put above is unconditional, so remote KV did receive every value;\n' +
         '       it is the edge cache that was left alone, and it holds translations for a year.\n' +
         '       If you expected a change here, .i18n-hashes.json is describing a state that\n' +
-        '       this KV namespace is not actually in.',
+        '       this KV namespace is not actually in (after a git revert of translations, say):\n' +
+        '       run migrate --purge-all.',
     )
-    writeHashes(paths, baselineFile, worker.kvId, currentHashes)
+    writeHashes(paths, baselineFile, worker, currentHashes)
     return
   }
 
-  loadDevVars(paths.wranglerRoot)
+  loadDevVars(paths.wranglerRoot, options.env)
 
   const zoneId = worker.zoneId || process.env.CLOUDFLARE_ZONE_ID
   const apiToken = process.env.CLOUDFLARE_CACHEPURGE_API_TOKEN
@@ -577,6 +630,11 @@ async function deploy({
   if (!zoneId) {
     fail(
       `❌ CLOUDFLARE_ZONE_ID not found in ${scope} or the environment, so the cache purge was skipped. ${CACHE_NOT_PURGED}`,
+    )
+  }
+  if (!ZONE_ID.test(zoneId)) {
+    fail(
+      `❌ CLOUDFLARE_ZONE_ID "${zoneId}" is not a zone id (32 hex characters), so the cache purge was skipped. ${CACHE_NOT_PURGED}`,
     )
   }
   if (!apiToken) {
@@ -611,22 +669,27 @@ async function deploy({
   }
 
   console.log('[i18n] ✅ Cache purge completed.')
-  writeHashes(paths, baselineFile, worker.kvId, currentHashes)
+  writeHashes(paths, baselineFile, worker, currentHashes)
 }
 
-// The baseline of `kvId` replaced in the file, the other namespaces' kept (ADR-0034).
-function writeHashes(paths: Paths, baselineFile: unknown, kvId: string, hashes: HashMap): void {
-  fs.writeFileSync(paths.hashes, JSON.stringify(writeBaseline(baselineFile, kvId, hashes), null, 2) + '\n', 'utf8')
+// The baseline of the Worker's KV id replaced in the file, the other namespaces' kept
+// (ADR-0034); an old flat file stays the top-level id's.
+function writeHashes(paths: Paths, baselineFile: unknown, worker: WorkerSettings, hashes: HashMap): void {
+  const file = writeBaseline(baselineFile, worker.kvId, hashes, worker.topLevelKvId)
+  fs.writeFileSync(paths.hashes, JSON.stringify(file, null, 2) + '\n', 'utf8')
   console.log(`[i18n] ✅ ${shown(paths.hashes)} updated.`)
 }
 
 /**
  * Load the Worker root's .dev.vars into process.env. wrangler dev reads .dev.vars for
  * the Worker runtime, but Node does not — so it is parsed here, with the same dotenv
- * syntax (dev-vars.ts). Never overwrites a variable already set in the real environment.
+ * syntax (dev-vars.ts). With `--env <name>`, `.dev.vars.<name>` replaces `.dev.vars` when it
+ * exists, as in wrangler (the two are not merged). Never overwrites a variable already set
+ * in the real environment.
  */
-function loadDevVars(wranglerRoot: string): void {
-  const devVarsPath = path.join(wranglerRoot, '.dev.vars')
+function loadDevVars(wranglerRoot: string, env: string | undefined): void {
+  const envPath = env !== undefined ? path.join(wranglerRoot, `.dev.vars.${env}`) : undefined
+  const devVarsPath = envPath !== undefined && fs.existsSync(envPath) ? envPath : path.join(wranglerRoot, '.dev.vars')
   if (!fs.existsSync(devVarsPath)) return
 
   for (const [key, value] of Object.entries(parseDevVars(fs.readFileSync(devVarsPath, 'utf8')))) {
@@ -656,30 +719,30 @@ function loadDevVars(wranglerRoot: string): void {
 // precondition that refuses to run, rather than a warning nobody sees.
 //
 // `seed` never writes this file, so it is exempt and never dirties it.
+//
+// Only the baseline of the KV namespace this run writes is compared with the committed
+// file (`git show HEAD:<file>`): a migrate of another namespace earlier in the same job
+// (`migrate --env staging && migrate`) changes only its own entry.
 // ---------------------------------------------------------------------------
 
 /**
- * Abort if the purge baseline carries uncommitted changes.
+ * Abort if the baseline of `kvId` in the purge baseline file differs from the committed
+ * one. `flatOwner`: the top-level KV id, whose baseline an old flat file is.
  *
  * Outside a git work tree, or with no git on PATH, this warns and proceeds: a
  * guard on the deploy path must not be the reason the CLI cannot run in CI
  * or from a tarball.
  */
-function assertCleanPurgeBaseline(paths: Paths): void {
-  // git runs from the project root on the bare file name; messages show the path from
-  // where the CLI was run.
+function assertCleanPurgeBaseline(paths: Paths, kvId: string, flatOwner: string | undefined): void {
+  // git runs from the project root on the file's path from there; messages show the path
+  // from where the CLI was run.
   const relativePath = path.relative(paths.root, paths.hashes).split(path.sep).join('/')
   const shownPath = shown(paths.hashes)
-  let status: string
+  const git = (args: string[]) =>
+    execFileSync('git', args, { cwd: paths.root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
   try {
-    // Porcelain v1 is a stable format, and `--` scopes it to the one path, so a
-    // dirty working tree elsewhere (the usual state) is not this guard's business.
-    status = execFileSync('git', ['status', '--porcelain', '--', relativePath], {
-      cwd: paths.root,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    git(['rev-parse', '--is-inside-work-tree'])
   } catch (err) {
     console.warn(
       `[i18n] ⚠️  Could not check ${shownPath} against git (${err instanceof Error ? err.message.split('\n')[0] : String(err)}).\n` +
@@ -689,11 +752,28 @@ function assertCleanPurgeBaseline(paths: Paths): void {
     return
   }
 
-  if (status.trim() === '') return
+  // The committed file; none when HEAD does not have it (a first migrate, or no commit yet).
+  let committed: string | undefined
+  try {
+    committed = git(['show', `HEAD:./${relativePath}`])
+  } catch {
+    committed = undefined
+  }
+  const working = fs.existsSync(paths.hashes) ? fs.readFileSync(paths.hashes, 'utf8') : undefined
+
+  const entryOf = (text: string | undefined) =>
+    text === undefined ? {} : readBaseline(JSON.parse(text) as unknown, kvId, flatOwner)
+  let same: boolean
+  try {
+    same = stableStringify(entryOf(committed)) === stableStringify(entryOf(working))
+  } catch {
+    // Not JSON: the run itself reports the working file; a broken committed one is history.
+    return
+  }
+  if (same) return
 
   console.error(
-    `\n[i18n] ❌ ${shownPath} has uncommitted changes. Refusing to migrate.\n` +
-      `\n  git status --porcelain: ${status.trim()}\n` +
+    `\n[i18n] ❌ ${shownPath}: the baseline of KV namespace ${kvId} differs from the committed one (HEAD). Refusing to migrate.\n` +
       '\n  That file is the purge baseline: the record of what remote KV already holds.\n' +
       '  Migrating against a modified copy makes the change diff come out wrong. Every value\n' +
       '  is still pushed to KV, but the cache purge is driven by that diff, so stale edge\n' +

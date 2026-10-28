@@ -38,8 +38,9 @@ const { common, landing } = await fetchTranslations(translationLocale, ['common'
 </BaseLayout>
 ```
 
-Localized pages live under `src/pages/[lang]/…`; the middleware guarantees the first segment is
-a supported locale.
+Localized pages live under `src/pages/[lang]/…`. Read the locale from `Astro.locals.uiLocale`
+(set by the middleware in both modes), not from `Astro.params.lang`: in
+`'prefix-except-default'` a root URL has no locale segment.
 
 ### Route layout
 

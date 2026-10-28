@@ -75,7 +75,7 @@ test('schema: numbers and booleans are typed as such, in a list too', () => {
   assert.match(content, /"count": number;\n {12}"on": boolean;\n {12}"years": number\[\];\n {12}"flags": boolean\[\];/)
 })
 
-test('schema: an array of objects is the union of its element shapes', () => {
+test('schema: an array of objects is one merged object type: a key in every element required, others optional', () => {
   const content = buildTypesContent(
     { en: { plans: { tiers: [{ name: 'Free' }, { name: 'Pro', price: 9 }, { name: 'Team' }] } } },
     'en',
@@ -89,9 +89,7 @@ declare global {
       "plans": {
             "tiers": Array<{
               "name": string;
-            } | {
-              "name": string;
-              "price": number;
+              "price"?: number;
             }>;
           };
     }
@@ -101,6 +99,27 @@ declare global {
 export {}
 `,
   )
+})
+
+test('schema: merged element types: a key of differing types is a union, nested objects and lists merge too', () => {
+  const content = buildTypesContent(
+    {
+      en: {
+        plans: {
+          tiers: [
+            { name: 'Free', price: 'free', meta: { badge: 'new' }, features: ['a'] },
+            { name: 'Pro', price: 9, meta: { badge: 'hot', note: 'x' }, features: [] },
+            { name: 'Team', price: 29, meta: { note: 'y' }, features: [{ label: 'SSO' }] },
+          ],
+        },
+      },
+    },
+    'en',
+  )
+  // features mixes strings and objects across elements (each array is one kind).
+  assert.match(content, /"name": string;\n {14}"price": string \| number;/)
+  assert.match(content, /"meta": \{\n {16}"badge"\?: string;\n {16}"note"\?: string;\n {14}\};/)
+  assert.match(content, /"features": Array<\{\n {16}"label": string;\n {14}\} \| string>;/)
 })
 
 test('schema: a null value stops generation, naming the key path and the file', () => {

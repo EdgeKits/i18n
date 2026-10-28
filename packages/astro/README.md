@@ -92,9 +92,11 @@ Locale codes (the keys of `languages`) are lowercase everywhere: the config, the
 folders and the URLs (`pt-br`, not `pt-BR`). `toIetfTag()` from `./format` gives the IETF form
 (`pt-BR`) where one is needed, such as `<html lang>` and hreflang.
 
-The config is validated when it loads: an empty `languages`, a `defaultLocale` or
-`markdownLocale` outside it, or a bad `countryToLocale` entry throws with a message naming the
-field.
+The config is validated when it loads, and each of these throws with a message naming the
+field: an empty `languages`; a locale key that is not lowercase; a `keyPrefix` that is not a
+URL host as written; a `defaultLocale` or `markdownLocale` outside `languages`; a `routing`
+other than the two modes; a `countryToLocale` key that is not an uppercase country code, or a
+value outside `languages`.
 
 ### 4. Add the integration
 
@@ -168,9 +170,11 @@ The default locale's files define the schema: their namespaces and keys are the 
 locale may leave keys out; the default locale's text fills the gaps.
 
 Values are typed as written: strings, numbers and booleans. Lists are allowed and typed:
-`["a", "b"]` is `string[]`, a list of objects is `Array<…>`, the union of its element shapes,
-and a locale that has the list replaces it whole. `null` is rejected: leave the key out to fall
-back to the default locale's text.
+`["a", "b"]` is `string[]`; a list of objects is `Array<{…}>`, one object type merged from
+its elements (a key every element has is required, any other optional, a key whose type differs
+between elements a union); a locale that has the list replaces it whole. Two things stop the
+CLI, naming the key path and the file: a `null` (leave the key out to fall back to the default
+locale's text) and a list that mixes kinds of elements (strings and objects).
 
 ### 6. Generate and seed
 
@@ -198,17 +202,32 @@ changed, and deletes the KV keys of files removed since. Rules:
 - Only `migrate` writes it, and only after both purges succeeded (or nothing changed). `seed`
   never touches it: local KV is not production.
 - Commit it after every `migrate`. It is the record of what production holds.
-- `migrate` refuses to run while the file has uncommitted changes, since a wrong baseline would
-  skip purges silently. When that git check cannot run (no `git` on the PATH, or not a git work
-  tree), `migrate` warns and proceeds without the purge-baseline check.
+- `migrate` refuses to run while the baseline of the KV namespace it writes differs from the
+  one in the committed file (`HEAD`), since a wrong baseline would skip purges silently. Only
+  that namespace's entry counts: `migrate --env staging && migrate` in one job works. When the
+  git check cannot run (no `git` on the PATH, or not a git work tree), `migrate` warns and
+  proceeds without it.
+- A file from 0.2.x (one flat baseline) is the baseline of the top-level `TRANSLATIONS` id,
+  whichever environment migrates first; it is rewritten per KV id.
+- After a `git revert` of translations, the baseline is reverted with them and reports no
+  change: run `migrate --purge-all`, which purges every namespace's URLs whatever the
+  baseline says.
 
 `migrate` reads the zone ID from `CLOUDFLARE_ZONE_ID` (a var in `wrangler.jsonc` or the
 environment) and the token from `CLOUDFLARE_CACHEPURGE_API_TOKEN` (the environment or
 `.dev.vars`). It purges, waits 65 s for KV to settle (`--purge-delay`), and purges again.
-Without the zone ID or token, or when a purge fails, it still pushes to KV but exits 1 and
-leaves `.i18n-hashes.json` alone, so the next run retries. `--env <name>` reads the binding and
-the zone ID from `env.<name>`. All flags:
+Without the zone ID or token, when deleting the removed keys or a purge fails, it still pushes
+to KV but exits 1 and leaves `.i18n-hashes.json` alone, so the next run retries. The zone ID
+must be 32 hex characters. `--env <name>` reads the binding and the zone ID from `env.<name>`,
+and `.dev.vars.<name>` instead of `.dev.vars` when it exists (as wrangler does). Two
+environments on one zone with different KV namespaces need a `keyPrefix` each (a config per
+environment): with one, their cache URLs are the same, and `migrate` warns. An unknown
+argument (`-e staging`) exits 1. All flags:
 [the core's CLI reference](https://github.com/EdgeKits/i18n/tree/main/packages/core#cli).
+
+After you delete a translation file, `migrate` removes its key from production KV; `seed`
+does not touch local KV's copy. Wipe `.wrangler/state` (or delete the key with
+`wrangler kv key delete --local`) so `astro dev` stops serving it.
 
 ### 7. Use translations in a page
 
@@ -257,14 +276,14 @@ add the line.
 
 ### Which entry to import
 
-| Entry                               | Where it runs              | What it holds                                                                                                  |
-| ----------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `@edgekits/astro-i18n`              | `astro.config` (Node)      | `edgekitsI18n()` (the integration) and `defineI18nConfig`                                                      |
-| `@edgekits/astro-i18n/config`       | anywhere, Node-safe        | `defineI18nConfig`, `localesOf(config)` (`DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `LANGUAGES`), the types        |
-| `@edgekits/astro-i18n/format`       | anywhere, Node-safe        | `fmt`, `plural`, `pluralIcu`, `toIetfTag`, `replaceLocaleInPath`, `getLangFromUrl`                             |
-| `@edgekits/astro-i18n/runtime`      | workerd only (pages, APIs) | `fetchTranslations`, the locale constants from the integration's config, locale resolution, the format helpers |
-| `@edgekits/astro-i18n/middleware`   | workerd only               | the i18n middleware (`onRequest`); registered for you unless `middleware: 'manual'`                            |
-| `@edgekits/astro-i18n/components/*` | `.astro` pages             | `LanguageSwitcher`, `MissingTranslationBanner`                                                                 |
+| Entry                               | Where it runs              | What it holds                                                                                                     |
+| ----------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `@edgekits/astro-i18n`              | `astro.config` (Node)      | `edgekitsI18n()` (the integration) and `defineI18nConfig`                                                         |
+| `@edgekits/astro-i18n/config`       | anywhere, Node-safe        | `defineI18nConfig`, `localesOf(config)` (`DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `LANGUAGES`), the types           |
+| `@edgekits/astro-i18n/format`       | anywhere, Node-safe        | `fmt`, `plural`, `pluralIcu`, `toIetfTag`, `localizedPath`, `isFilePath`, `replaceLocaleInPath`, `getLangFromUrl` |
+| `@edgekits/astro-i18n/runtime`      | workerd only (pages, APIs) | `fetchTranslations`, the locale constants from the integration's config, locale resolution, the format helpers    |
+| `@edgekits/astro-i18n/middleware`   | workerd only               | the i18n middleware (`onRequest`); registered for you unless `middleware: 'manual'`                               |
+| `@edgekits/astro-i18n/components/*` | `.astro` pages             | `LanguageSwitcher`, `MissingTranslationBanner`                                                                    |
 
 Node-safe entries import nothing from `cloudflare:workers` and no virtual module, so unit tests
 under Node and `src/content.config.ts` (evaluated by `astro sync`) can use them. `./runtime` and
@@ -272,12 +291,14 @@ under Node and `src/content.config.ts` (evaluated by `astro sync`) can use them.
 
 ### Geo-IP locale fallback: `countryToLocale`
 
-When a request's URL has no locale, the middleware picks one in this order: the language
-cookie, then the `Accept-Language` header (each tag in `q` order, the full tag, then its
-language part, so `es-MX` reaches `es`; the first tag that names one of your `languages` wins),
-then, only when no tag matched, the visitor's country (`request.cf.country`) through your
-`countryToLocale` table, and finally `defaultLocale`. The middleware reads the header itself;
-Astro's `preferredLocale` is not used.
+In `'prefix'`, when a request's URL has no locale, the middleware picks one in this order: the
+language cookie, then the `Accept-Language` header (each tag in `q` order, the full tag, then
+its language part, so `es-MX` reaches `es`; the first tag that names one of your `languages`
+wins), then, only when no tag matched, the visitor's country (`request.cf.country`) through
+your `countryToLocale` table, and finally `defaultLocale`. The middleware reads the header itself;
+Astro's `preferredLocale` is not used. In `'prefix-except-default'` a URL without a locale is a
+default-locale page: no cascade runs, and only a language cookie naming another locale
+redirects (see [Routing modes](#routing-modes)).
 
 ```ts
 // edgekits-i18n.config.ts
@@ -308,11 +329,22 @@ export default defineI18nConfig({
 })
 ```
 
+In `'prefix'`:
+
 | Request          | With `markdownLocale: 'en'` | Without `markdownLocale` |
 | ---------------- | --------------------------- | ------------------------ |
 | `/de/blog/x.md/` | redirect to `/en/blog/x.md` | passed through as is     |
 | `/blog/x.md`     | redirect to `/en/blog/x.md` | passed through as is     |
 | `/en/blog/x.md`  | served                      | passed through as is     |
+
+In `'prefix-except-default'` (default locale `en`), the default locale's form has no prefix, and
+a `.md` path without a locale renders from the default locale's `[lang]` endpoint:
+
+| Request          | With `markdownLocale: 'en'` | With `markdownLocale: 'de'` | Without `markdownLocale`    |
+| ---------------- | --------------------------- | --------------------------- | --------------------------- |
+| `/de/blog/x.md/` | redirect to `/blog/x.md`    | redirect to `/de/blog/x.md` | passed through as is        |
+| `/blog/x.md`     | served (as `/en/blog/x.md`) | redirect to `/de/blog/x.md` | served (as `/en/blog/x.md`) |
+| `/en/blog/x.md`  | redirect to `/blog/x.md`    | redirect to `/de/blog/x.md` | passed through as is        |
 
 Use it when your markdown endpoints exist in one locale only. Without it, the package assumes
 nothing about them.
@@ -348,7 +380,8 @@ percent-encoded (`/%61dmin/` for `/admin/`, under the `/<defaultLocale>/…` rew
 
 In `'prefix-except-default'`, build canonical and hreflang URLs from `Astro.originPathname`
 (the URL the visitor requested; `Astro.url` is the rewritten `/<defaultLocale>/…`) through
-`localizedPath` from `/runtime`. Astro's own `astro:i18n` URL helpers prefix the default locale
+`localizedPath` from `/runtime`, appended to `Astro.url.origin` (string concatenation, not
+`new URL(path, Astro.site)`: the path is the visitor's, and only the origin is yours). Astro's own `astro:i18n` URL helpers prefix the default locale
 here, so `localizedPath` is the one to use:
 
 ```astro
@@ -363,9 +396,9 @@ const options = {
 const path = Astro.originPathname
 ---
 
-<link rel="canonical" href={new URL(localizedPath(Astro.locals.uiLocale, path, options), Astro.site)} />
-{SUPPORTED_LOCALES.map((locale) => <link rel="alternate" hreflang={toIetfTag(locale)} href={new URL(localizedPath(locale, path, options), Astro.site)} />)}
-<link rel="alternate" hreflang="x-default" href={new URL(localizedPath(DEFAULT_LOCALE, path, options), Astro.site)} />
+<link rel="canonical" href={Astro.url.origin + localizedPath(Astro.locals.uiLocale, path, options)} />
+{SUPPORTED_LOCALES.map((locale) => <link rel="alternate" hreflang={toIetfTag(locale)} href={Astro.url.origin + localizedPath(locale, path, options)} />)}
+<link rel="alternate" hreflang="x-default" href={Astro.url.origin + localizedPath(DEFAULT_LOCALE, path, options)} />
 ```
 
 Two limits:
@@ -384,8 +417,8 @@ Two limits:
 - **Files and system paths pass through.** A path whose last segment ends in an extension that
   starts with a letter is a file (`/rss.xml`, `/doc.pdf`, `/site.webmanifest`; `/blog/v2.0` is
   a page), and so is everything under `/api`, `/assets`, `/_astro`, `/_image`, `/_actions`,
-  `/_server-islands`, `/.well-known` and `/favicon.ico`, each matched on a segment boundary
-  (`/apis/` is a page). When Astro answers such a request with its 404 page, the middleware
+  `/_server-islands`, `/.well-known`, `/favicon.ico` and the Vite dev server's `/@vite`, `/@id`,
+  `/@fs`, `/src` and `/node_modules`, each matched on a segment boundary (`/apis/` is a page). When Astro answers such a request with its 404 page, the middleware
   sends a plain-text 404 instead; any other response passes unchanged.
 - **A page whose last segment contains a dot is addressed with its trailing slash**
   (`/team/john.doe/`): without it, `/team/john.doe` is a file path, gets no redirect and no
@@ -536,9 +569,9 @@ cache.
 
 **Workers for Platforms, untrusted namespace.** `request.cf` is absent, so the country step of
 the locale cascade never runs. `caches.default` is disabled, so every render reads its
-namespaces from KV in one bulk read: the output is correct, only the cache layer and its KV
-savings are gone. Set `I18N_CACHE=off` so the behaviour is explicit, and expect one bulk KV read
-per render.
+namespaces from KV in bulk reads of up to 100 keys: the output is correct, only the cache
+layer and its KV savings are gone. Set `I18N_CACHE=off` so the behaviour is explicit, and
+expect one bulk KV read per render (per 100 namespaces).
 
 <!-- skill-guide:start -->
 
@@ -737,8 +770,8 @@ A locale without a `countryCode` shows its name alone. A `countryCode` whose SVG
 
 Before it reports back, the skill runs its adoption checklist: the config matches your answers
 and every locale code is lowercase; `seed` writes the generated files and leaves
-`.i18n-hashes.json` alone; `astro check` passes; under `astro dev`, `/` redirects to a locale,
-each locale renders its own copy (or the default locale's, if it has no JSON yet), an unknown
+`.i18n-hashes.json` alone; `astro check` passes; under `astro dev`, `/` redirects to a locale
+(`'prefix'`) or renders the default locale (`'prefix-except-default'`), each locale renders its own copy (or the default locale's, if it has no JSON yet), an unknown
 first segment such as `/zz/` is prefixed rather than crashing, `<html lang>` reads `pt-BR` on a
 `pt-br` page, hreflang tags cover every locale plus `x-default`, and the switcher changes the
 URL and sets the language cookie. It also checks that no page is left at `src/pages/*.astro`
@@ -764,7 +797,7 @@ seed`. A key that exists only in another locale is not typed.
 
 `.i18n-hashes.json` records what production KV holds. Only a successful `migrate` writes it,
 it is committed right after, and nothing else edits it. `migrate` refuses to run while that
-file has uncommitted changes.
+file's baseline for the KV namespace it writes differs from the committed one.
 
 ### Forms and SEO
 
@@ -808,13 +841,14 @@ canonical at the original instead of using `noindex`.
   run since. Add it to the default locale and run `seed` (or `bundle`); if the editor still
   shows the error, restart its TypeScript server.
 - **`Cannot find module 'cloudflare:workers'` in `tsc`.** Run `npx wrangler types`.
-- **`migrate` refuses to run.** `.i18n-hashes.json` has uncommitted changes. If the last
-  `migrate` wrote it, commit it. If anything else changed it, discard the change with
+- **`migrate` refuses to run.** The baseline of the KV namespace it writes, in
+  `.i18n-hashes.json`, differs from the committed one. If the last `migrate` wrote it, commit it. If anything else changed it, discard the change with
   `git checkout .i18n-hashes.json` and run `migrate` again. Never edit or delete it to get
   past the check.
 - **`migrate` exits 1 after "KV is updated; the edge cache is not".** The purge was skipped or
-  failed: the zone ID or token is missing, or the Purge API refused. Fix it and run `migrate`
-  again; it retries the same purge. If it exited 0 and the site still shows old copy, the zone
+  failed (the zone ID or token is missing or malformed, or the Purge API refused), or deleting
+  the KV keys of removed files failed. Fix it and run `migrate` again; it retries the same
+  deletions and purge. If it exited 0 and the site still shows old copy, the zone
   is not proxied.
 - **npm 12: `esbuild` or `workerd` did not install.** npm 12 blocks dependency install
   scripts by default and lists the skipped packages at the end of `npm install`. Both need
@@ -849,11 +883,14 @@ under their own terms. EdgeKits runs no service behind this plugin.
 
 ## How it works
 
-A request reaches the middleware, which settles the URL's locale (redirecting when there is
-none) and sets `uiLocale` and `translationLocale` on `Astro.locals`. A page asks
+A request reaches the middleware, which settles the URL's locale (in `'prefix'` it redirects a
+URL without one; in `'prefix-except-default'` it renders such a URL as the default locale's
+page through an internal rewrite to `/<defaultLocale>/…`) and sets `uiLocale` and
+`translationLocale` on `Astro.locals`. A page asks
 `fetchTranslations` for the namespaces it renders. Each namespace is looked up in the Workers
 Cache API under `https://<keyPrefix>/…`; the misses are read from KV in batches of up to 100
-keys, and their KV values are written back to the cache in the background. Every namespace,
+keys, and their KV values are written back to the cache in the background, marked
+`X-EdgeKits-I18n: v2` (a response at that URL without the mark is a miss). Every namespace,
 cached or fresh, is merged over the compiled default-locale fallbacks when it is read, so a new
 default-locale key shows in every locale on the next deploy. A cached value lives for a year
 (`s-maxage=31536000, immutable`): `migrate` purges the ones whose content changed, and leaves
