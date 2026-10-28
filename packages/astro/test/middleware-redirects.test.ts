@@ -14,7 +14,7 @@ import { createI18nMiddleware, i18nMiddleware } from '../src/middleware/i18n.ts'
  * en/de/es/ja, default en, cookie `lang`.
  */
 
-type Fake = { cookie?: string; acceptLanguage?: string; country?: string }
+type Fake = { cookie?: string; acceptLanguage?: string; country?: string; method?: string; status?: number }
 
 type CookieSet = { name: string; value: string; options: Record<string, unknown> }
 
@@ -26,7 +26,7 @@ async function run(
   let nextCalled = false
   const cookieSets: CookieSet[] = []
   const headers = fake.acceptLanguage ? { 'Accept-Language': fake.acceptLanguage } : undefined
-  const request = new Request(`https://example.com${path}`, { headers })
+  const request = new Request(`https://example.com${path}`, { headers, method: fake.method ?? 'GET' })
   Object.assign(request, { cf: fake.country ? { country: fake.country } : undefined })
 
   const context = {
@@ -47,7 +47,7 @@ async function run(
   }
   const next = async () => {
     nextCalled = true
-    return new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } })
+    return new Response('<html></html>', { status: fake.status ?? 200, headers: { 'Content-Type': 'text/html' } })
   }
 
   const response = (await handler(context as never, next as never)) as Response
@@ -176,4 +176,49 @@ test('query kept: a .md path moved to markdownLocale', async () => {
   const { response } = await run('/de/x.md?x=1', {}, withMarkdownLocale())
   assert.equal(response.status, 301)
   assert.equal(response.headers.get('Location'), '/en/x.md?x=1')
+})
+
+// Lane 3 (0.3.0) in 'prefix': error pages, methods, case, the bypass list.
+
+test('prefix: /404 and /500 pass through untouched, with the default locale in locals', async () => {
+  for (const path of ['/404', '/404/', '/500']) {
+    const { response, nextCalled } = await run(path, { status: 404, cookie: 'de' })
+    assert.equal(nextCalled, true, path)
+    assert.equal(response.status, 404, path)
+    assert.equal(await response.text(), '<html></html>', path)
+  }
+  const de = await run('/de/404/')
+  assert.equal(de.nextCalled, true)
+})
+
+test('prefix: POST without a locale is 307, a missing trailing slash 308', async () => {
+  const root = (await run('/', { method: 'POST', acceptLanguage: 'de' })).response
+  assert.equal(root.status, 307)
+  assert.equal(root.headers.get('Location'), '/de/')
+  assert.equal(root.headers.get('Cache-Control'), 'private, no-store')
+  const slash = (await run('/de/contact', { method: 'POST' })).response
+  assert.equal(slash.status, 308)
+  assert.equal(slash.headers.get('Location'), '/de/contact/')
+  assert.equal((await run('/', { method: 'HEAD' })).response.status, 302)
+})
+
+test('prefix: a locale segment in another case is one permanent redirect', async () => {
+  for (const [path, location] of [
+    ['/DE/about/', '/de/about/'],
+    ['/EN/', '/en/'],
+    ['/Ja/blog/x', '/ja/blog/x/'],
+  ]) {
+    const { response } = await run(path!)
+    assert.equal(response.status, 301, path)
+    assert.equal(response.headers.get('Location'), location, path)
+  }
+})
+
+test('prefix: islands, .well-known and /api/ pass; /apis/ is negotiated', async () => {
+  for (const path of ['/_server-islands/Greeting?e=1', '/.well-known/webfinger', '/api/x']) {
+    const { response, nextCalled } = await run(path)
+    assert.equal(nextCalled, true, path)
+    assert.equal(response.status, 200, path)
+  }
+  assertNegotiated((await run('/apis/')).response, '/en/apis/')
 })

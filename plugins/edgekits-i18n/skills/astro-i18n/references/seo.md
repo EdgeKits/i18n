@@ -65,6 +65,9 @@ src/pages/                      src/pages/
   `[lang]` page renders.
 - Endpoints that are not localized stay at the root: `robots.txt`, `sitemap.xml`, `llms.txt`,
   `/api/*`. Files in `public/` are served as they are.
+- The error pages stay at the root too: `src/pages/404.astro` (and `500.astro`), never under
+  `[lang]`. They read the locale from `Astro.locals` (the middleware lets `/404` through
+  untouched, and keeps the visitor's locale when Astro renders it for a missing page).
 - `Astro.originPathname` is the path the visitor requested; `Astro.url.pathname` is the path
   that rendered, which in the root mode is the rewritten `/<defaultLocale>/…`. Canonical,
   hreflang and links come from `localizedPath` over `Astro.originPathname`, never from
@@ -335,9 +338,9 @@ const slug = Astro.params.slug ?? ''
 const altLocales = (await getPostLocales()).get(slug) ?? []
 const contentLocale = altLocales.includes(uiLocale) ? uiLocale : DEFAULT_LOCALE
 const post = altLocales.includes(contentLocale) ? await getEntry('blog', `${contentLocale}/${slug}`) : undefined
-// Astro.rewrite runs the middleware again: in the root mode a `/<default>/` prefix would be
-// normalised away with a 301, so the target goes through localizedPath.
-if (!post) return Astro.rewrite(localizedPath(uiLocale, '/404/', pathOptions))
+// The 404 page stays at the root (src/pages/404.astro, not under [lang]) and reads the
+// locale from Astro.locals: the middleware lets /404 through untouched, in both modes.
+if (!post) return Astro.rewrite('/404')
 
 const isFallback = contentLocale !== uiLocale
 Astro.locals.isMissingContent = isFallback // the banner shows in 'content' mode

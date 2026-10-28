@@ -26,6 +26,7 @@ export type { Bindings, EdgeCache, FetcherInputs, TranslationsKv } from './fetch
 export {
   fmt,
   getLangFromUrl,
+  isFilePath,
   localizedPath,
   plural,
   pluralIcu,

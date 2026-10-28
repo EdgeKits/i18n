@@ -38,6 +38,8 @@ export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = 
           astroConfig.root,
         )
 
+        assertAstroRouting(astroConfig)
+
         // Astro sets `Astro.currentLocale` (read by `resolveLocale`) only with an `i18n`
         // block: set it when the project has none, check it when it has one.
         if (astroConfig.i18n) assertAstroI18n(astroConfig.i18n, i18nConfig)
@@ -55,6 +57,9 @@ export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = 
         if (middleware === 'auto') {
           addMiddleware({ entrypoint: '@edgekits/astro-i18n/middleware', order: 'pre' })
         }
+      },
+      'astro:routes:resolved': ({ routes }) => {
+        if (i18nConfig.routing === 'prefix-except-default') assertNoPrerenderedLangRoute(routes)
       },
       'astro:config:done': ({ injectTypes }) => {
         injectTypes({ filename: 'locales.d.ts', content: localesDeclaration(Object.keys(i18nConfig.languages)) })
@@ -105,16 +110,59 @@ export function localesDeclaration(locales: readonly string[]): string {
 }
 
 /**
+ * The Astro settings the middleware cannot work under, refused at config time:
+ * - `trailingSlash: 'never'`: Astro removes a trailing slash before the middleware runs
+ *   (astro/dist/core/routing/handler.js:105-107, Astro 7.4.2), and the middleware adds it
+ *   back: every page would redirect forever. `'ignore'` (the default) and `'always'` work.
+ * - a `base` other than `/`: the middleware's paths and redirects assume the site's root.
+ */
+export function assertAstroRouting(astroConfig: Pick<AstroConfig, 'trailingSlash' | 'base'>): void {
+  if (astroConfig.trailingSlash === 'never') {
+    throw new Error(
+      "[@edgekits/astro-i18n] `trailingSlash: 'never'` is not supported: Astro removes the trailing slash " +
+        'before the middleware runs, and the middleware adds it back to every page, so each request would ' +
+        "redirect forever. Use 'ignore' (the default) or 'always'.",
+    )
+  }
+  if (astroConfig.base !== undefined && astroConfig.base !== '/') {
+    throw new Error(
+      `[@edgekits/astro-i18n] \`base: ${JSON.stringify(astroConfig.base)}\` is not supported: the middleware's ` +
+        'locale paths and redirects are built from the site root. Serve the site at the root of its host ' +
+        '(remove `base`, or set it to "/").',
+    )
+  }
+}
+
+/**
+ * In 'prefix-except-default' the default locale's pages render through a rewrite to
+ * `/<default>/…`, and Astro refuses a rewrite from an on-demand request into a
+ * prerendered route (ForbiddenRewrite, a 500: astro/dist/core/rewrites/handler.js:29-33,
+ * Astro 7.4.2). Every `[lang]` route must be on-demand.
+ */
+export function assertNoPrerenderedLangRoute(routes: ReadonlyArray<{ pattern: string; isPrerendered: boolean }>): void {
+  const prerendered = routes.find(
+    (route) => route.isPrerendered && (route.pattern === '/[lang]' || route.pattern.startsWith('/[lang]/')),
+  )
+  if (prerendered) {
+    throw new Error(
+      `[@edgekits/astro-i18n] ${prerendered.pattern} is prerendered: with routing 'prefix-except-default' the ` +
+        "default locale's pages render through a rewrite to /<default>/…, and Astro refuses a rewrite into a " +
+        "prerendered route (ForbiddenRewrite). Remove `export const prerender = true` from that page, or use routing 'prefix'.",
+    )
+  }
+}
+
+/**
  * The Astro `i18n` block set when the project has none: locales and default from the
  * config; routed as locale-prefixed in both modes (the middleware redirects `/` itself in
  * 'prefix', so Astro does not). Complete, `fallbackType` included: Astro does not
  * re-validate what `updateConfig` merges, so its schema defaults never fill a partial block.
  *
  * `prefixDefaultLocale: true` in 'prefix-except-default' too: Astro's own i18n check runs
- * after the middleware, on the rewritten URL (astro/dist/core/routing/handler.js:128-130),
- * and with `prefixDefaultLocale: false` the strategy `pathname-prefix-other-locales`
- * answers notFound to any path carrying the default locale (astro/dist/i18n/router.js:
- * 104-121) — the rewritten `/<default>/about/` is exactly that. With `true` the check
+ * after the middleware, on the rewritten URL (astro/dist/core/routing/handler.js:167-169,
+ * Astro 7.4.2), and with `prefixDefaultLocale: false` the strategy
+ * `pathname-prefix-other-locales` answers notFound to any path carrying the default locale
+ * (astro/dist/i18n/router.js:107-124) — the rewritten `/<default>/about/` is exactly that. With `true` the check
  * passes and `Astro.currentLocale` works on root pages.
  */
 export function astroI18n(config: I18nConfig): NonNullable<AstroConfig['i18n']> {

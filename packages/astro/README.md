@@ -369,8 +369,40 @@ Two limits:
   page at `/de/` (a content slug `de`) cannot exist next to the German site.
 - A shared HTML cache in front of the site must key root paths on the lang cookie, or skip
   caching requests that carry one: the same URL renders for a cookie-less visitor and
-  redirects one whose cookie names another locale. Under `'prefix'`, `/en/` is in the same
-  situation: it answers a visitor whose cookie names another locale with a `Set-Cookie`.
+  redirects one whose cookie names another locale. Every default-locale page response carries
+  `Vary: Cookie`, but Cloudflare's cache ignores `Vary: Cookie`: a Cache Rule must bypass
+  requests with the lang cookie, or include it in the cache key. Under `'prefix'`, `/en/` is in
+  the same situation: it answers a visitor whose cookie names another locale with a `Set-Cookie`.
+
+#### What the middleware leaves alone, and the rules it keeps (both modes)
+
+- **Files and system paths pass through.** A path whose last segment ends in an extension that
+  starts with a letter is a file (`/rss.xml`, `/doc.pdf`, `/site.webmanifest`; `/blog/v2.0` is
+  a page), and so is everything under `/api`, `/assets`, `/_astro`, `/_image`, `/_actions`,
+  `/_server-islands`, `/.well-known` and `/favicon.ico`, each matched on a segment boundary
+  (`/apis/` is a page). When Astro answers such a request with its 404 page, the middleware
+  sends a plain-text 404 instead; any other response passes unchanged.
+- **Server islands** (`server:defer`) are fetched from `/_server-islands/…`, a URL without a
+  locale: in the island, `Astro.locals.uiLocale` is the default locale. Pass the page's locale
+  to the island as a prop.
+- **Error pages stay at the root**: `src/pages/404.astro` (and `500.astro`), not under
+  `[lang]`. `/404` and `/500` pass through untouched, and the page reads the locale from
+  `Astro.locals` (the visitor's, when Astro renders it for a missing page under `/de/`). In a
+  page, answer a missing entry with `return Astro.rewrite('/404')`.
+- **Redirects keep the method.** For a request other than GET or HEAD (a form POST), a
+  permanent normalisation is a 308 and a negotiated redirect a 307, so the body is resent.
+- **The locale segment is lower case.** `/DE/about/` and `/pt-BR/` redirect permanently, in one
+  hop, to the canonical lower-case URL (`/de/about/`, `/pt-br/`; the default locale without its
+  prefix in `'prefix-except-default'`).
+- **A response that sets the lang cookie is `Cache-Control: private`** (the URL wins over a
+  stale cookie, and the corrected cookie is this visitor's); an existing `no-store` stays.
+
+The integration refuses three Astro settings at build time, each with the reason:
+`trailingSlash: 'never'` (Astro strips the slash the middleware adds: every page would
+redirect forever; `'ignore'` and `'always'` work), a `base` other than `/` (the middleware's
+paths assume the site root), and in `'prefix-except-default'` a prerendered `[lang]` route
+(`export const prerender = true`): root URLs render through a rewrite, and Astro refuses a
+rewrite into a prerendered route.
 
 ### Styling the components
 
@@ -698,7 +730,7 @@ each locale renders its own copy (or the default locale's, if it has no JSON yet
 first segment such as `/zz/` is prefixed rather than crashing, `<html lang>` reads `pt-BR` on a
 `pt-br` page, hreflang tags cover every locale plus `x-default`, and the switcher changes the
 URL and sets the language cookie. It also checks that no page is left at `src/pages/*.astro`
-and that every `countryCode` has its SVG.
+(the error pages `404.astro` and `500.astro` excepted) and that every `countryCode` has its SVG.
 
 ### Everyday work
 

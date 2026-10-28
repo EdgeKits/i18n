@@ -219,7 +219,7 @@ each locale renders its own copy (or the default locale's, if it has no JSON yet
 first segment such as `/zz/` is prefixed rather than crashing, `<html lang>` reads `pt-BR` on a
 `pt-br` page, hreflang tags cover every locale plus `x-default`, and the switcher changes the
 URL and sets the language cookie. It also checks that no page is left at `src/pages/*.astro`
-and that every `countryCode` has its SVG.
+(the error pages `404.astro` and `500.astro` excepted) and that every `countryCode` has its SVG.
 
 ### Everyday work
 

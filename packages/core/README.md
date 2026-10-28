@@ -64,9 +64,12 @@ The instance also carries the locale constants (`DEFAULT_LOCALE`, `SUPPORTED_LOC
 lang-cookie helpers over any `CookieJar`, and the KV key and cache URL builders the CLI shares.
 `routing` in the config is validated here but read by the adapter.
 
-The pure helpers are exported from the root and from `./format` (Node-safe): `fmt`, `plural`,
-`pluralIcu`, `toIetfTag`, and `localizedPath`, the path of a page in a locale for either
-routing mode (a leading locale segment is stripped first; the result ends in a slash):
+The pure helpers are exported from the root and from `./format` (Node-safe): `fmt`, `plural`
+(both forms interpolate `{count}`), `pluralIcu`, `toIetfTag` (`zh-hant-tw` -> `zh-Hant-TW`),
+`isFilePath`, and `localizedPath`, the path of a page in a locale for either routing mode. A
+leading locale segment is stripped first; the result ends in a slash, except for a file path
+(`isFilePath`: the last segment ends in an extension that starts with a letter, `/rss.xml`, not
+`/blog/v2.0`); a `?query` and a `#hash` in the input are kept after the path:
 
 ```ts
 import { localizedPath } from '@edgekits/i18n-core/format'
@@ -76,6 +79,8 @@ const options = { routing: 'prefix-except-default', defaultLocale: 'en', isLocal
 localizedPath('de', '/about/', options) // '/de/about/'
 localizedPath('en', '/de/about/', options) // '/about/'
 localizedPath('en', '/de/about/', { ...options, routing: 'prefix' }) // '/en/about/'
+localizedPath('de', '/rss.xml', options) // '/de/rss.xml'
+localizedPath('de', '/about/?x=1#top', options) // '/de/about/?x=1#top'
 ```
 
 ## CLI

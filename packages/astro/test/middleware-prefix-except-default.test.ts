@@ -13,7 +13,19 @@ import { createI18nMiddleware, type I18nMiddlewareDeps } from '../src/middleware
  */
 
 // `routePattern`: the route Astro matched for the original URL, before any rewrite.
-type Fake = { cookie?: string; acceptLanguage?: string; country?: string; contentType?: string; routePattern?: string }
+// `status` and `cacheControl` shape the response `next` returns; `locals`, what an earlier
+// pass of the middleware left (Astro re-runs it for an error page).
+type Fake = {
+  cookie?: string
+  acceptLanguage?: string
+  country?: string
+  contentType?: string
+  routePattern?: string
+  method?: string
+  status?: number
+  cacheControl?: string
+  locals?: Record<string, unknown>
+}
 type CookieSet = { name: string; value: string }
 
 function middleware(locales: string[], extra: Partial<I18nMiddlewareDeps> = {}) {
@@ -44,10 +56,10 @@ async function run(handler: ReturnType<typeof middleware>, path: string, fake: F
   const nextCalls: Array<{ payload: unknown; locals: Record<string, unknown> }> = []
   const headers: Record<string, string> = {}
   if (fake.acceptLanguage) headers['Accept-Language'] = fake.acceptLanguage
-  const request = new Request(`https://example.com${path}`, { headers })
+  const request = new Request(`https://example.com${path}`, { headers, method: fake.method ?? 'GET' })
   Object.assign(request, { cf: fake.country ? { country: fake.country } : undefined })
 
-  const locals: Record<string, unknown> = {}
+  const locals: Record<string, unknown> = { ...fake.locals }
   const context = {
     request,
     url: new URL(request.url),
@@ -61,7 +73,9 @@ async function run(handler: ReturnType<typeof middleware>, path: string, fake: F
   }
   const next = async (payload?: unknown) => {
     nextCalls.push({ payload, locals: { ...context.locals } })
-    return new Response('<html></html>', { headers: { 'Content-Type': fake.contentType ?? 'text/html' } })
+    const responseHeaders: Record<string, string> = { 'Content-Type': fake.contentType ?? 'text/html' }
+    if (fake.cacheControl) responseHeaders['Cache-Control'] = fake.cacheControl
+    return new Response('<html></html>', { status: fake.status ?? 200, headers: responseHeaders })
   }
 
   const response = (await handler(context as never, next as never)) as Response
@@ -276,7 +290,7 @@ test('a locale-less path of a [lang] route is served for the default locale, wha
     assert.deepEqual(nextCalls, [{ payload: '/en/rss.xml?x=1', locals: { uiLocale: 'en', translationLocale: 'en' } }])
   }
   // Rewritten, then nothing renders but the 404 page: the soft 404.
-  const missing = await run(handler, '/missing.xml', { routePattern: '/[lang]' })
+  const missing = await run(handler, '/missing.xml', { routePattern: '/[lang]', status: 404 })
   assert.equal(missing.response.status, 404)
   assert.equal(missing.response.headers.get('Content-Type'), 'text/plain; charset=utf-8')
 })
@@ -287,7 +301,7 @@ test("a [lang] route's /<default>/… form normalises permanently, without a tra
   assertRedirect(response, 301, '/rss.xml?x=1')
   assert.equal(nextCalls.length, 0)
   // No [lang] route behind it: no redirect, the soft 404.
-  assert.equal((await run(handler, '/en/missing.xml', { routePattern: '/404' })).response.status, 404)
+  assert.equal((await run(handler, '/en/missing.xml', { routePattern: '/404', status: 404 })).response.status, 404)
 })
 
 test('root routes, ignored prefixes and other locales pass through unrewritten', async () => {
@@ -309,4 +323,164 @@ test('root routes, ignored prefixes and other locales pass through unrewritten',
       path,
     )
   }
+})
+
+// ---------------------------------------------------------------------------
+// Lane 3 (0.3.0): files, islands, open redirect, error pages, responses, methods, case.
+// ---------------------------------------------------------------------------
+
+const payloads = (calls: Array<{ payload: unknown }>) => calls.map((c) => c.payload)
+
+test('server islands and .well-known pass through untouched, their 200 HTML kept', async () => {
+  const handler = middleware(FOUR)
+  for (const [path, routePattern] of [
+    ['/_server-islands/Greeting?e=x&p=y&s=z', '/_server-islands/[name]'],
+    ['/_server-islands/Greeting/', '/_server-islands/[name]'],
+    ['/.well-known/webfinger?resource=acct:a@example.com', '/404'],
+    ['/.well-known/security.txt', '/.well-known/security.txt'],
+  ]) {
+    const { response, nextCalls } = await run(handler, path!, { routePattern })
+    assert.deepEqual(payloads(nextCalls), [undefined], path)
+    assert.equal(response.status, 200, path)
+    assert.equal(await response.text(), '<html></html>', path)
+  }
+})
+
+test('an ignored prefix matches on a segment boundary: /apis/ is a page', async () => {
+  const handler = middleware(FOUR)
+  assert.deepEqual(payloads((await run(handler, '/apis/')).nextCalls), ['/en/apis/'])
+  assert.deepEqual(payloads((await run(handler, '/assets-guide/')).nextCalls), ['/en/assets-guide/'])
+  assert.deepEqual(payloads((await run(handler, '/api', { contentType: 'application/json' })).nextCalls), [undefined])
+  assert.deepEqual(payloads((await run(handler, '/api/x', { contentType: 'application/json' })).nextCalls), [undefined])
+})
+
+test('a file path is bypassed whatever its extension; a dotted page is not', async () => {
+  const handler = middleware(FOUR)
+  for (const path of ['/site.webmanifest', '/doc.pdf', '/feed.atom']) {
+    const { response, nextCalls } = await run(handler, path, { contentType: 'application/octet-stream' })
+    assert.equal(response.status, 200, path)
+    assert.deepEqual(payloads(nextCalls), [undefined], path)
+  }
+  assertRedirect((await run(handler, '/blog/v2.0')).response, 301, '/blog/v2.0/')
+})
+
+test('the /<default>/… form of a [lang] file route is built from segments: never a // or /\\ Location', async () => {
+  const handler = middleware(FOUR)
+  for (const [path, location] of [
+    ['/en//evil.com/x.png', '/evil.com/x.png'],
+    ['/en/%5Cevil.com/x.png', '/%5Cevil.com/x.png'],
+    ['/en/rss.xml', '/rss.xml'],
+  ]) {
+    const { response } = await run(handler, path!, { routePattern: '/[lang]/[...slug]', contentType: 'image/png' })
+    assertRedirect(response, 301, location!)
+    assert.doesNotMatch(response.headers.get('Location')!, /^\/[/\\]/, path)
+  }
+})
+
+test('/404 and /500 pass through untouched; /de/404/ is served as a page', async () => {
+  const handler = middleware(FOUR)
+  for (const path of ['/404', '/404/', '/500']) {
+    const { response, nextCalls, context } = await run(handler, path, {
+      routePattern: '/404',
+      status: 404,
+      cookie: 'de',
+    })
+    assert.equal(response.status, 404, path)
+    assert.equal(await response.text(), '<html></html>', `${path}: the page itself, not the soft 404`)
+    assert.deepEqual(payloads(nextCalls), [undefined], path)
+    assert.deepEqual(context.locals, { uiLocale: 'en', translationLocale: 'en' }, path)
+  }
+  const de = await run(handler, '/de/404/', { routePattern: '/[lang]/[...slug]' })
+  assert.deepEqual(payloads(de.nextCalls), [undefined])
+  assert.deepEqual(de.context.locals, { uiLocale: 'de', translationLocale: 'de' })
+})
+
+test('the error page re-entry (routePattern /404, pathname /404) keeps the locals and is not rewritten', async () => {
+  const handler = middleware(FOUR)
+  const locals = { uiLocale: 'de', translationLocale: 'de' }
+  const { nextCalls, context } = await run(handler, '/404', { routePattern: '/404', status: 404, locals })
+  assert.deepEqual(payloads(nextCalls), [undefined])
+  assert.deepEqual(context.locals, locals)
+})
+
+test('the soft 404 replaces only a 404 HTML response', async () => {
+  const handler = middleware(FOUR)
+  const ok = await run(handler, '/api/x', { routePattern: '/api/[x]' })
+  assert.equal(ok.response.status, 200)
+  assert.equal(await ok.response.text(), '<html></html>')
+  const error = await run(handler, '/api/x', { routePattern: '/api/[x]', status: 500 })
+  assert.equal(error.response.status, 500)
+  const missing = await run(handler, '/api/missing', { routePattern: '/404', status: 404 })
+  assert.equal(missing.response.status, 404)
+  assert.equal(missing.response.headers.get('Content-Type'), 'text/plain; charset=utf-8')
+})
+
+test('a default-locale page response carries Vary: Cookie (merged with an existing Vary)', async () => {
+  const handler = middleware(FOUR)
+  for (const path of ['/', '/about/', '/about/?x=1']) {
+    assert.equal((await run(handler, path)).response.headers.get('Vary'), 'Cookie', path)
+  }
+  assert.equal((await run(handler, '/about/', { cookie: 'en' })).response.headers.get('Vary'), 'Cookie')
+  assert.equal((await run(handler, '/de/about/')).response.headers.get('Vary'), null, 'another locale: no cookie read')
+  assert.equal(
+    (await run(handler, '/rss.xml', { routePattern: '/[lang]', contentType: 'application/xml' })).response.headers.get(
+      'Vary',
+    ),
+    null,
+  )
+})
+
+test('a response that writes the lang cookie is Cache-Control: private, merged, never weakening no-store', async (t) => {
+  t.mock.method(console, 'warn', () => {})
+  const handler = middleware(FOUR)
+  const cases: Array<[path: string, cookie: string, given: string | undefined, expected: string | null]> = [
+    ['/de/about/', 'ja', undefined, 'private'],
+    ['/de/about/', 'ja', 'public, max-age=60, s-maxage=600', 'private, max-age=60'],
+    ['/de/about/', 'ja', 'no-store', 'private, no-store'],
+    ['/de/about', 'ja', undefined, 'private'],
+    ['/about/', 'dark-mode', 'public, s-maxage=60', 'private'],
+    ['/de/about/', 'de', 'public, max-age=60', 'public, max-age=60'],
+  ]
+  for (const [path, cookie, given, expected] of cases) {
+    const { response } = await run(handler, path, { cookie, cacheControl: given })
+    assert.equal(response.headers.get('Cache-Control'), expected, `${path} cookie=${cookie} ${given}`)
+  }
+})
+
+test('POST, PUT, DELETE: permanent normalisations are 308, the cookie redirect 307', async () => {
+  const handler = middleware(FOUR)
+  for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+    assertRedirect((await run(handler, '/de/contact', { method })).response, 308, '/de/contact/')
+    assertRedirect((await run(handler, '/en/contact/', { method })).response, 308, '/contact/')
+    assertRedirect((await run(handler, '/contact', { method })).response, 308, '/contact/')
+    assertRedirect((await run(handler, '/contact/', { method, cookie: 'de' })).response, 307, '/de/contact/')
+  }
+  for (const method of ['GET', 'HEAD']) {
+    assertRedirect((await run(handler, '/de/contact', { method })).response, 301, '/de/contact/')
+    assertRedirect((await run(handler, '/contact/', { method, cookie: 'de' })).response, 302, '/de/contact/')
+  }
+  const action = await run(handler, '/?_action=newsletter.subscribe', { method: 'POST' })
+  assert.deepEqual(
+    payloads(action.nextCalls),
+    ['/en/?_action=newsletter.subscribe'],
+    'a POST to a canonical URL is served',
+  )
+})
+
+test('a locale segment in another case: one permanent redirect to the lower-case form', async () => {
+  const handler = middleware(FOUR)
+  for (const [path, location] of [
+    ['/DE/about/', '/de/about/'],
+    ['/De/about', '/de/about/'],
+    ['/EN/about/', '/about/'],
+    ['/JA/?x=1', '/ja/?x=1'],
+    ['/DE/rss.xml', '/de/rss.xml'],
+  ]) {
+    const { response, nextCalls } = await run(handler, path!)
+    assertRedirect(response, 301, location!)
+    assert.equal(nextCalls.length, 0, path)
+  }
+  const regional = middleware(['en', 'pt-br'])
+  assertRedirect((await run(regional, '/pt-BR/about/')).response, 301, '/pt-br/about/')
+  assertRedirect((await run(handler, '/DE/about/', { method: 'POST' })).response, 308, '/de/about/')
 })

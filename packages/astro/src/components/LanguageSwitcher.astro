@@ -111,6 +111,25 @@ const hasChoice = SUPPORTED_LOCALES.length > 1
   // cannot import the project's config.
   import type { Locale } from '../constants'
 
+  // The core's `localizedPath`, inlined (a client script imports types only): the page's
+  // path in `targetLang`, a file path (`/rss.xml`) without a trailing slash. The URL carries
+  // the current locale's prefix exactly when it has one (every locale in 'prefix', all but
+  // the default in 'prefix-except-default'), so `currentLang` is the only segment to strip.
+  // It receives pathnames only. `test/language-switcher-script.test.ts` compares it with the core.
+  function localizedPathOf(
+    pathname: string,
+    targetLang: string,
+    currentLang: string | undefined,
+    routing: string | undefined,
+    defaultLocale: string | undefined,
+  ): string {
+    const segments = pathname.split('/').filter(Boolean)
+    if (segments[0] === currentLang) segments.shift()
+    const isFile = /\.[a-z][a-z0-9]{0,10}$/i.test(pathname.slice(pathname.lastIndexOf('/') + 1))
+    const rest = segments.length > 0 ? `${segments.join('/')}${isFile ? '' : '/'}` : ''
+    return routing !== 'prefix' && targetLang === defaultLocale ? `/${rest}` : `/${targetLang}/${rest}`
+  }
+
   class LanguageSwitcher extends HTMLElement {
     private trigger: HTMLButtonElement | null = null
     private dropdown: HTMLElement | null = null
@@ -162,18 +181,6 @@ const hasChoice = SUPPORTED_LOCALES.length > 1
       this.dropdown.hidden ? this.open() : this.close()
     }
 
-    // The core's `localizedPath`, inlined (a client script imports types only): the page's
-    // path in `targetLang`. The URL carries the current locale's prefix exactly when it has
-    // one (every locale in 'prefix', all but the default in 'prefix-except-default'), so
-    // `data-current-lang` is the only segment to strip.
-    private localizedPath(pathname: string, targetLang: string): string {
-      const { currentLang, routing, defaultLocale } = this.dataset
-      const segments = pathname.split('/').filter(Boolean)
-      if (segments[0] === currentLang) segments.shift()
-      const rest = segments.length > 0 ? `${segments.join('/')}/` : ''
-      return routing !== 'prefix' && targetLang === defaultLocale ? `/${rest}` : `/${targetLang}/${rest}`
-    }
-
     private onSelect = (event: Event) => {
       const target = event.target as HTMLElement
       const button = target.closest<HTMLButtonElement>('[data-ls-item]')
@@ -191,7 +198,10 @@ const hasChoice = SUPPORTED_LOCALES.length > 1
       // either side (cookie-storage.ts): the server validates it, never trusts it.
       document.cookie = `${cookieName}=${lang}; path=/; max-age=${cookieMaxAge}; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`
 
-      window.location.href = this.localizedPath(window.location.pathname, lang)
+      // The query string goes along (`?utm=…`); the hash names a part of this page, not the other.
+      const { currentLang, routing, defaultLocale } = this.dataset
+      window.location.href =
+        localizedPathOf(window.location.pathname, lang, currentLang, routing, defaultLocale) + window.location.search
     }
 
     private onDocumentClick = (event: MouseEvent) => {

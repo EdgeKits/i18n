@@ -1,5 +1,6 @@
 import type { AstroCookies, MiddlewareHandler } from 'astro'
 import {
+  isFilePath,
   localizedPath,
   MARKDOWN_PATH,
   markdownRedirectTarget,
@@ -12,12 +13,12 @@ import { DEFAULT_LOCALE, type Locale } from '../constants'
 import { readCookieLang, setCookieLang, type CookieLang } from '../cookie-storage'
 import { resolveLocaleForTranslations } from '../resolve-locale'
 
-// Regex to identify public static assets (images, fonts, scripts, etc.)
-// These files should bypass i18n routing and locale detection.
-const PUBLIC_FILE_REGEX = /\.(ico|png|jpg|jpeg|svg|webp|gif|css|js|map|txt|xml|json|woff2?|avif|md)$/i
-
-// List of URL prefixes that should be ignored by the i18n middleware.
-// Includes API endpoints, internal Astro paths, and standard static routes.
+// List of URL prefixes that should be ignored by the i18n middleware, each matched on a
+// segment boundary (`/api` and `/api/…`, never `/apis/`).
+// Includes API endpoints, internal Astro paths, and standard static routes. Server islands
+// are fetched from `<base>/_server-islands/<component>` (astro/dist/runtime/server/render/
+// server-islands.js:153), a URL without a locale: they render with the default locale in
+// `locals` unless the page passes the locale as a prop.
 // The Vite dev-server prefixes (/@vite, /@id, /@fs, /src, /node_modules) make
 // dev survive `run_worker_first: ["/*"]` being left on: without them every
 // dev-module request fell through to the locale logic, got redirected to
@@ -29,13 +30,22 @@ const IGNORED_PREFIXES = [
   '/_astro',
   '/_image',
   '/_actions',
-  '/favicon',
+  '/_server-islands',
+  '/.well-known',
+  '/favicon.ico',
   '/@vite',
   '/@id',
   '/@fs',
   '/src',
   '/node_modules',
 ]
+
+// The error pages, at the root in both modes. Passed through untouched: Astro renders them
+// for a request whose route is missing and runs the middleware again for them
+// (astro/dist/core/errors/default-handler.js:68-80), and a page's `Astro.rewrite('/404')`
+// re-runs it on `/404` (core/rewrites/handler.js:67-71). Astro's own `isRoute404` accepts
+// `/404/` as well (core/routing/internal/route-errors.js).
+const ERROR_PAGE = /^\/(404|500)\/?$/
 
 // Extracts the context type from Astro's MiddlewareHandler for cleaner function signatures.
 type I18nMiddlewareContext = Parameters<MiddlewareHandler>[0]
@@ -74,15 +84,28 @@ export type I18nMiddlewareDeps = {
 // next visit to `/`, and the URL-wins cookie sync below would then overwrite that choice.
 //
 // Both kinds, in both routing modes, keep the query string (`?utm=…`, `?sent=1`).
-const REDIRECT_STATUS = import.meta.env?.DEV ? 302 : 301
+//
+// A request other than GET or HEAD (a form POST) keeps its method and body across the hop:
+// 308 for a permanent normalisation (307 under `astro dev`), 307 for a negotiated one.
+// A 301 or 302 would let the browser resend it as a GET without the body.
+const IS_DEV = !!import.meta.env?.DEV
+const REDIRECT_STATUS = IS_DEV ? 302 : 301
+
+const keepsMethod = (request: Request) => request.method !== 'GET' && request.method !== 'HEAD'
+
+// The status of a deterministic normalisation for this request.
+function permanentStatus(request: Request): 301 | 302 | 307 | 308 {
+  if (!keepsMethod(request)) return REDIRECT_STATUS
+  return IS_DEV ? 307 : 308
+}
 
 // A redirect whose target depends on the visitor: temporary, never stored by a shared
 // cache, and keyed on the request headers that chose it (the country is not a request
 // header, hence `no-store` rather than relying on Vary alone). `vary` names only the
 // headers that were consulted: the root of 'prefix-except-default' reads the cookie alone.
-function negotiatedRedirect(target: string, vary = 'Cookie, Accept-Language'): Response {
+function negotiatedRedirect(request: Request, target: string, vary = 'Cookie, Accept-Language'): Response {
   return new Response(null, {
-    status: 302,
+    status: keepsMethod(request) ? 307 : 302,
     headers: {
       Location: target,
       'Cache-Control': 'private, no-store',
@@ -91,7 +114,39 @@ function negotiatedRedirect(target: string, vary = 'Cookie, Accept-Language'): R
   })
 }
 
-const isIgnoredPrefix = (pathname: string) => IGNORED_PREFIXES.some((p) => pathname.startsWith(p))
+// Edits a response's headers in place, or on a copy when they are immutable (a response
+// from `fetch()`).
+function withHeaders(response: Response, edit: (headers: Headers) => void): Response {
+  try {
+    edit(response.headers)
+    return response
+  } catch {
+    const copy = new Response(response.body, response)
+    edit(copy.headers)
+    return copy
+  }
+}
+
+// `Vary: Cookie` added to whatever the response varies on already.
+function varyOnCookie(headers: Headers): void {
+  const vary = headers.get('Vary')
+  if (!vary) return headers.set('Vary', 'Cookie')
+  const fields = vary.split(',').map((field) => field.trim().toLowerCase())
+  if (!fields.includes('*') && !fields.includes('cookie')) headers.set('Vary', `${vary}, Cookie`)
+}
+
+// A response that sets the lang cookie is for one visitor: `private` replaces `public` and
+// `s-maxage` (a shared cache's directives); every other directive, `no-store` included, stays.
+function makePrivate(headers: Headers): void {
+  const kept = (headers.get('Cache-Control') ?? '')
+    .split(',')
+    .map((directive) => directive.trim())
+    .filter((directive) => directive !== '' && !/^(public|private|s-maxage=.*)$/i.test(directive))
+  headers.set('Cache-Control', ['private', ...kept].join(', '))
+}
+
+const isIgnoredPrefix = (pathname: string) =>
+  IGNORED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))
 
 // The project's localized routes live under `src/pages/[lang]/`. `context.routePattern` is
 // the route Astro matched for the original URL, before any rewrite: a locale-less
@@ -104,12 +159,13 @@ const isLangRoute = (routePattern: string | undefined) =>
 // or its built-in one): astro/dist/core/routing/internal/astro-designed-error-pages.js.
 const NOT_FOUND_ROUTE = '/404'
 
-// Determines if the current request path matches static assets or ignored prefixes.
-// Returns true to skip i18n processing for this request.
+// Determines if the current request path is a file (any extension that starts with a
+// letter: the core's isFilePath) or an ignored prefix. Returns true to skip i18n
+// processing for this request.
 function shouldBypassI18n(pathname: string): boolean {
-  if (PUBLIC_FILE_REGEX.test(pathname)) return true
+  if (isFilePath(pathname)) return true
   if (isIgnoredPrefix(pathname)) return true
-  // Markdown endpoints: /en/blog/slug.md/ (with or without trailing slash)
+  // Markdown endpoints in the `.md/` form (`/en/blog/slug.md/`); `.md` is a file path
   if (MARKDOWN_PATH.test(pathname)) return true
   return false
 }
@@ -152,14 +208,15 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
 
   // The `.md` redirect target, or null. 'prefix': the core's markdown-path.ts as is.
   // 'prefix-except-default': the same target without the default locale's prefix (through
-  // localizedPath, minus the trailing slash a `.md` path never has); a path already at
-  // `/<default>/…` is redirected too, since that is no longer canonical.
+  // localizedPath, which keeps a file path without a trailing slash; the `.md/` form loses
+  // its slash first); a path already at `/<default>/…` is redirected too, since that is no
+  // longer canonical.
   function markdownTarget(pathname: string): string | null {
     const target = markdownRedirectTarget(pathname, { isLocale, markdownLocale: deps.markdownLocale })
     if (deps.routing === 'prefix') return target
     if (!deps.markdownLocale || !MARKDOWN_PATH.test(pathname)) return null
 
-    const localized = localizedPath(deps.markdownLocale, target ?? pathname, pathOptions).slice(0, -1)
+    const localized = localizedPath(deps.markdownLocale, (target ?? pathname).replace(/\/+$/, ''), pathOptions)
     return localized === pathname ? null : localized
   }
 
@@ -187,7 +244,8 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     //     on the same host, a locale this site does not have) is corrected to the
     //     URL locale too, so a stale value never outlives the next request.
     const cookie = deps.readCookieLang(context.cookies)
-    if (cookie.present && cookie.locale !== urlLocale) {
+    const writesCookie = cookie.present && cookie.locale !== urlLocale
+    if (writesCookie) {
       deps.setCookieLang(context.cookies, urlLocale)
     }
     // Set uiLocale to Astro locals
@@ -198,11 +256,13 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
 
     // Normalize trailing slash and structure
     const normalized = buildLocalizedPath(urlLocale, segments.slice(1))
-    if (pathname !== normalized) {
-      return context.redirect(normalized + url.search, REDIRECT_STATUS)
-    }
+    const response =
+      pathname !== normalized
+        ? context.redirect(normalized + url.search, permanentStatus(context.request))
+        : await next()
 
-    return await next()
+    // The Set-Cookie makes the response this visitor's: no shared cache may keep it.
+    return writesCookie ? withHeaders(response, makePrivate) : response
   }
 
   // 'prefix-except-default': the default locale at the root, the others under their prefix.
@@ -217,7 +277,10 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
 
     // The default locale's prefix is not canonical: one permanent hop to the path without it.
     if (urlLocale === deps.defaultLocale) {
-      return context.redirect(localizedPath(deps.defaultLocale, pathname, pathOptions) + search, REDIRECT_STATUS)
+      return context.redirect(
+        localizedPath(deps.defaultLocale, pathname, pathOptions) + search,
+        permanentStatus(context.request),
+      )
     }
 
     if (urlLocale) {
@@ -231,26 +294,37 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     context.locals.translationLocale = deps.resolveLocaleForTranslations(deps.defaultLocale)
 
     const cookie = deps.readCookieLang(context.cookies)
+    let writesCookie = false
     if (cookie.present && cookie.locale !== deps.defaultLocale) {
       if (cookie.locale) {
-        return negotiatedRedirect(localizedPath(cookie.locale, pathname, pathOptions) + search, 'Cookie')
+        return negotiatedRedirect(
+          context.request,
+          localizedPath(cookie.locale, pathname, pathOptions) + search,
+          'Cookie',
+        )
       }
       // Present but invalid: corrected to the URL's locale, as serveLocalized does.
       deps.setCookieLang(context.cookies, deps.defaultLocale)
+      writesCookie = true
     }
 
     const normalized = localizedPath(deps.defaultLocale, pathname, pathOptions)
+    let response: Response
     if (pathname !== normalized) {
-      return context.redirect(normalized + search, REDIRECT_STATUS)
+      response = context.redirect(normalized + search, permanentStatus(context.request))
+    } else {
+      // The project's pages live under `src/pages/[lang]/`: render `/<default>/…` while the
+      // URL stays. `next(path)` rewrites without running the middleware again
+      // (astro/dist/core/middleware/astro-middleware.js:33-40, Astro 7.4.2) and keeps
+      // `locals`; `context.rewrite()` would re-run it (core/rewrites/handler.js:67-71).
+      // The rewritten URL is built from the string alone (core/routing/rewrite.js:22), and
+      // `context.url`, Astro.url and Actions' `?_action=` read it: the query goes in too.
+      // The page depends on the lang cookie (a valid other locale redirects away), so it
+      // varies on it.
+      response = withHeaders(await next(`/${deps.defaultLocale}${pathname}${search}`), varyOnCookie)
     }
 
-    // The project's pages live under `src/pages/[lang]/`: render `/<default>/…` while the
-    // URL stays. `next(path)` rewrites without running the middleware again
-    // (astro/dist/core/middleware/astro-middleware.js:33-40) and keeps `locals`;
-    // `context.rewrite()` would re-run it (astro/dist/core/rewrites/handler.js:67-71).
-    // The rewritten URL is built from the string alone (core/routing/rewrite.js:22), and
-    // `context.url`, Astro.url and Actions' `?_action=` read it: the query goes in too.
-    return await next(`/${deps.defaultLocale}${pathname}${search}`)
+    return writesCookie ? withHeaders(response, makePrivate) : response
   }
 
   // Main i18n middleware handler. Intercepts incoming requests, manages routing,
@@ -262,6 +336,26 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     // 1. Split the URL early to access its segments
     const segments = pathname.split('/').filter(Boolean) // "/es/about/" -> ["es", "about"]
     const firstSegment = segments[0] ?? null
+
+    // The error pages: no redirect, no rewrite. On a re-entry for an error page the locals
+    // an earlier pass set (the visitor's locale) stay; a direct request gets the default.
+    if (ERROR_PAGE.test(pathname)) {
+      if (context.locals.uiLocale === undefined) {
+        context.locals.uiLocale = deps.defaultLocale
+        context.locals.translationLocale = deps.resolveLocaleForTranslations(deps.defaultLocale)
+      }
+      return await next()
+    }
+
+    // A locale segment in another case (`/DE/…`, `/pt-BR/…`): one permanent hop to the
+    // canonical lower-case path (without the default's prefix in 'prefix-except-default').
+    if (firstSegment && !isLocale(firstSegment) && isLocale(firstSegment.toLowerCase())) {
+      const lowered = `/${[firstSegment.toLowerCase(), ...segments.slice(1)].join('/')}${pathname.endsWith('/') ? '/' : ''}`
+      return context.redirect(
+        localizedPath(firstSegment.toLowerCase(), lowered, pathOptions) + url.search,
+        permanentStatus(context.request),
+      )
+    }
 
     // 2. SAFETY NET (For static file 404 pages)
     // Attempt to infer the locale from the URL, or fallback to the default.
@@ -283,7 +377,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
       // (the core's markdown-path.ts). Without `markdownLocale` they pass through untouched.
       const target = markdownTarget(pathname)
       if (target) {
-        return context.redirect(target + url.search, REDIRECT_STATUS)
+        return context.redirect(target + url.search, permanentStatus(context.request))
       }
 
       // 'prefix-except-default': the default locale's `[lang]` routes answer at the root,
@@ -295,8 +389,13 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
       let rewrite: string | undefined
       if (deps.routing !== 'prefix') {
         const markdown = MARKDOWN_PATH.test(pathname)
+        // Built from the path's segments (localizedPath), never by slicing the pathname:
+        // `/en//evil.com/x.png` must not become the protocol-relative `//evil.com/x.png`.
         if (firstSegment === deps.defaultLocale && !markdown && isLangRoute(context.routePattern)) {
-          return context.redirect(pathname.slice(deps.defaultLocale.length + 1) + url.search, REDIRECT_STATUS)
+          return context.redirect(
+            localizedPath(deps.defaultLocale, pathname, pathOptions) + url.search,
+            permanentStatus(context.request),
+          )
         }
         const langRouteOrNone = isLangRoute(context.routePattern) || context.routePattern === NOT_FOUND_ROUTE
         if (
@@ -310,13 +409,13 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
 
       const contentType = response.headers.get('content-type') || ''
       const isHtml = contentType.includes('text/html')
-      const isRedirect = response.status >= 300 && response.status < 400
 
-      // If Astro attempts to return HTML for a static/API request (and it's not a redirect),
-      // it means the file wasn't found and Astro rendered a fallback page (404.astro or catch-all).
-      // We strictly intercept this and return a lightweight text-based 404 instead.
+      // If Astro answers a static/API request with a 404 HTML page, the file wasn't found
+      // and Astro rendered its fallback (404.astro). We intercept this and return a
+      // lightweight text-based 404 instead: an HTML response with any other status (a
+      // server island, an endpoint that renders HTML) is the route's own answer and passes.
       // Why? To mitigate Directory Bruteforcing / Fuzzing attacks and save resources.
-      if (isHtml && !isRedirect) {
+      if (isHtml && response.status === 404) {
         // Aggressively save Worker CPU cycles for missing static files
         return new Response('Not found', {
           status: 404,
@@ -337,7 +436,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     if (!firstSegment) {
       const target = buildLocalizedPath(fallbackLocale, [])
       if (pathname !== target) {
-        return negotiatedRedirect(target + url.search)
+        return negotiatedRedirect(context.request, target + url.search)
       }
       return await next()
     }
@@ -353,7 +452,7 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
     const target = buildLocalizedPath(fallbackLocale, segments)
 
     if (pathname !== target) {
-      return negotiatedRedirect(target + url.search)
+      return negotiatedRedirect(context.request, target + url.search)
     }
 
     return await next()

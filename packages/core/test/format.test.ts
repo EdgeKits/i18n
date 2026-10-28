@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { localizedPath, replaceLocaleInPath, type LocalizedPathOptions } from '../src/format.ts'
+import {
+  isFilePath,
+  localizedPath,
+  plural,
+  replaceLocaleInPath,
+  toIetfTag,
+  type LocalizedPathOptions,
+} from '../src/format.ts'
 
 /**
  * `localizedPath`: the page path in a locale for either routing mode. In 'prefix' it agrees
@@ -61,4 +68,75 @@ test("'prefix': a non-canonical /en gets the trailing slash replaceLocaleInPath 
   // No equality claim here: replaceLocaleInPath('/en', 'en', 'de') returns '/en' unchanged.
   assert.equal(localizedPath('de', '/en', options('prefix')), '/de/')
   assert.equal(localizedPath('en', '/about', options('prefix')), '/en/about/')
+})
+
+test('isFilePath: the last segment ends in an extension that starts with a letter', () => {
+  const cases: Array<[path: string, expected: boolean]> = [
+    ['/rss.xml', true],
+    ['/feed.json', true],
+    ['/x.webmanifest', true],
+    ['/doc.pdf', true],
+    ['/de/blog/x.md', true],
+    ['/IMG.PNG', true],
+    ['/blog/v2.0', false],
+    ['/about/', false],
+    ['/rss.xml/', false],
+    ['/', false],
+    ['/archive.tar.gz', true],
+    ['/x.averyverylongext', false],
+    ['/v1.2.3', false],
+  ]
+  for (const [path, expected] of cases) assert.equal(isFilePath(path), expected, path)
+})
+
+test('localizedPath: a file path keeps no trailing slash, in both modes', () => {
+  const cases: Array<[routing: LocalizedPathOptions['routing'], locale: string, input: string, expected: string]> = [
+    ['prefix-except-default', 'en', '/rss.xml', '/rss.xml'],
+    ['prefix-except-default', 'de', '/rss.xml', '/de/rss.xml'],
+    ['prefix-except-default', 'en', '/de/rss.xml', '/rss.xml'],
+    ['prefix-except-default', 'en', '/en//evil.com/x.png', '/evil.com/x.png'],
+    ['prefix', 'en', '/rss.xml', '/en/rss.xml'],
+    ['prefix', 'de', '/en/blog/x.md', '/de/blog/x.md'],
+    ['prefix-except-default', 'de', '/blog/v2.0', '/de/blog/v2.0/'],
+  ]
+  for (const [routing, locale, input, expected] of cases) {
+    assert.equal(localizedPath(locale, input, options(routing)), expected, `${routing} ${locale} ${input}`)
+  }
+})
+
+test('localizedPath: a ?query and a #hash in the input are kept after the path', () => {
+  const cases: Array<[routing: LocalizedPathOptions['routing'], locale: string, input: string, expected: string]> = [
+    ['prefix-except-default', 'de', '/about/?x=1#top', '/de/about/?x=1#top'],
+    ['prefix-except-default', 'en', '/de/about?x=1', '/about/?x=1'],
+    ['prefix-except-default', 'de', '/#top', '/de/#top'],
+    ['prefix', 'ja', '/en/rss.xml?page=2', '/ja/rss.xml?page=2'],
+    ['prefix', 'de', '/en/a/#b?c', '/de/a/#b?c'],
+  ]
+  for (const [routing, locale, input, expected] of cases) {
+    assert.equal(localizedPath(locale, input, options(routing)), expected, `${routing} ${locale} ${input}`)
+  }
+})
+
+test('toIetfTag: each subtag after the language cased by length', () => {
+  const cases: Array<[input: string, expected: string]> = [
+    ['en', 'en'],
+    ['pt-br', 'pt-BR'],
+    ['en-us', 'en-US'],
+    ['zh-hant-tw', 'zh-Hant-TW'],
+    ['zh-hant', 'zh-Hant'],
+    ['es-419', 'es-419'],
+    ['sr-latn-rs', 'sr-Latn-RS'],
+  ]
+  for (const [input, expected] of cases) assert.equal(toIetfTag(input), expected, input)
+})
+
+test('plural: both forms interpolate {count}', () => {
+  const cases: Array<[count: number, expected: string]> = [
+    [0, '0 items'],
+    [1, '1 item'],
+    [2, '2 items'],
+  ]
+  for (const [count, expected] of cases)
+    assert.equal(plural(count, '{count} item', '{count} items'), expected, String(count))
+  assert.equal(plural(1, 'one item', '{count} items'), 'one item', 'a form without {count} as is')
 })
