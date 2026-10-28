@@ -395,12 +395,34 @@ test('/404 and /500 pass through untouched; /de/404/ is served as a page', async
   assert.deepEqual(de.context.locals, { uiLocale: 'de', translationLocale: 'de' })
 })
 
-test('the error page re-entry (routePattern /404, pathname /404) keeps the locals and is not rewritten', async () => {
+// Astro re-enters for an error page with the ORIGINAL request (core/errors/default-handler.js:68):
+// the pathname is the visitor's, the route pattern the error page's.
+test('the error page re-entry (routePattern /404 or /500, the original path) keeps the locals and is not rewritten', async () => {
   const handler = middleware(FOUR)
-  const locals = { uiLocale: 'de', translationLocale: 'de' }
-  const { nextCalls, context } = await run(handler, '/404', { routePattern: '/404', status: 404, locals })
-  assert.deepEqual(payloads(nextCalls), [undefined])
-  assert.deepEqual(context.locals, locals)
+  for (const [path, routePattern] of [
+    ['/missing/', '/404'],
+    ['/de/missing/', '/404'],
+    ['/blog/broken/', '/500'],
+    ['/missing', '/404'],
+  ]) {
+    const locals = { uiLocale: 'de', translationLocale: 'de' }
+    const { response, nextCalls, context } = await run(handler, path!, {
+      routePattern,
+      status: 404,
+      locals,
+      cookie: 'ja',
+    })
+    assert.deepEqual(payloads(nextCalls), [undefined], path)
+    assert.equal(response.status, 404, path)
+    assert.equal(await response.text(), '<html></html>', path)
+    assert.deepEqual(context.locals, locals, path)
+  }
+})
+
+test('a first pass on an unmatched path (routePattern /404, no locals yet) is still rewritten', async () => {
+  const handler = middleware(FOUR)
+  const { nextCalls } = await run(handler, '/missing/', { routePattern: '/404', status: 404 })
+  assert.deepEqual(payloads(nextCalls), ['/en/missing/'])
 })
 
 test('the soft 404 replaces only a 404 HTML response', async () => {

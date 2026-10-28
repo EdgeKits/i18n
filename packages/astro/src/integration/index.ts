@@ -59,6 +59,7 @@ export function edgekitsI18n(config: I18nConfig, options: EdgekitsI18nOptions = 
         }
       },
       'astro:routes:resolved': ({ routes }) => {
+        assertNoPrerendered404(routes)
         if (i18nConfig.routing === 'prefix-except-default') assertNoPrerenderedLangRoute(routes)
       },
       'astro:config:done': ({ injectTypes }) => {
@@ -148,6 +149,25 @@ export function assertNoPrerenderedLangRoute(routes: ReadonlyArray<{ pattern: st
       `[@edgekits/astro-i18n] ${prerendered.pattern} is prerendered: with routing 'prefix-except-default' the ` +
         "default locale's pages render through a rewrite to /<default>/…, and Astro refuses a rewrite into a " +
         "prerendered route (ForbiddenRewrite). Remove `export const prerender = true` from that page, or use routing 'prefix'.",
+    )
+  }
+}
+
+/**
+ * A prerendered 404 page, in either mode: Astro serves it as a static file without the
+ * middleware (no locale in `locals`), and a page's `Astro.rewrite('/404')` into it from an
+ * on-demand request is a ForbiddenRewrite, a 500 (astro/dist/core/rewrites/handler.js:29-33,
+ * Astro 7.4.2). Only the project's own route counts: Astro's built-in 404 is on-demand.
+ */
+export function assertNoPrerendered404(
+  routes: ReadonlyArray<{ pattern: string; isPrerendered: boolean; origin?: string; entrypoint?: string }>,
+): void {
+  const page = routes.find((route) => route.pattern === '/404' && route.isPrerendered && route.origin === 'project')
+  if (page) {
+    throw new Error(
+      `[@edgekits/astro-i18n] ${page.entrypoint ?? 'src/pages/404.astro'} is prerendered: Astro serves a prerendered ` +
+        "404 page without the middleware, so it never gets the visitor's locale, and a page's `Astro.rewrite('/404')` " +
+        'into it is refused (ForbiddenRewrite, a 500). Remove `export const prerender = true` from the 404 page.',
     )
   }
 }

@@ -66,8 +66,12 @@ src/pages/                      src/pages/
 - Endpoints that are not localized stay at the root: `robots.txt`, `sitemap.xml`, `llms.txt`,
   `/api/*`. Files in `public/` are served as they are.
 - The error pages stay at the root too: `src/pages/404.astro` (and `500.astro`), never under
-  `[lang]`. They read the locale from `Astro.locals` (the middleware lets `/404` through
-  untouched, and keeps the visitor's locale when Astro renders it for a missing page).
+  `[lang]`, and on-demand (a prerendered 404 stops the build). They read the locale from
+  `Astro.locals` (the middleware lets `/404` through untouched, and keeps the visitor's locale
+  when Astro renders it for a missing page).
+- A page whose last segment contains a dot (`/team/john.doe/`) is linked with its trailing
+  slash: `/team/john.doe` is a file path, which the middleware leaves alone (no redirect, no
+  locale). `localizedPath` keeps the slash for a path that ends in `/`.
 - `Astro.originPathname` is the path the visitor requested; `Astro.url.pathname` is the path
   that rendered, which in the root mode is the rewritten `/<defaultLocale>/…`. Canonical,
   hreflang and links come from `localizedPath` over `Astro.originPathname`, never from

@@ -40,12 +40,18 @@ const IGNORED_PREFIXES = [
   '/node_modules',
 ]
 
-// The error pages, at the root in both modes. Passed through untouched: Astro renders them
-// for a request whose route is missing and runs the middleware again for them
-// (astro/dist/core/errors/default-handler.js:68-80), and a page's `Astro.rewrite('/404')`
-// re-runs it on `/404` (core/rewrites/handler.js:67-71). Astro's own `isRoute404` accepts
-// `/404/` as well (core/routing/internal/route-errors.js).
+// The error pages, at the root in both modes. Passed through untouched when requested
+// directly or through a page's `Astro.rewrite('/404')`, which re-runs the middleware on
+// `/404` (core/rewrites/handler.js:67-71). Astro's own `isRoute404` accepts `/404/` as well
+// (core/routing/internal/route-errors.js).
 const ERROR_PAGE = /^\/(404|500)\/?$/
+
+// When a route answers an empty 404 or 500, Astro renders the error page and runs the
+// middleware again for it with the ORIGINAL request (astro/dist/core/errors/
+// default-handler.js:68-80): the visitor's pathname, the error page's route pattern. The
+// locals the first pass set are still there, which tells it from a first pass on an
+// unmatched path (also routed to `/404`, with no locals yet).
+const ERROR_ROUTES = ['/404', '/500']
 
 // Extracts the context type from Astro's MiddlewareHandler for cleaner function signatures.
 type I18nMiddlewareContext = Parameters<MiddlewareHandler>[0]
@@ -339,7 +345,8 @@ export function createI18nMiddleware(deps: I18nMiddlewareDeps): MiddlewareHandle
 
     // The error pages: no redirect, no rewrite. On a re-entry for an error page the locals
     // an earlier pass set (the visitor's locale) stay; a direct request gets the default.
-    if (ERROR_PAGE.test(pathname)) {
+    const reentry = ERROR_ROUTES.includes(context.routePattern) && context.locals.uiLocale !== undefined
+    if (reentry || ERROR_PAGE.test(pathname)) {
       if (context.locals.uiLocale === undefined) {
         context.locals.uiLocale = deps.defaultLocale
         context.locals.translationLocale = deps.resolveLocaleForTranslations(deps.defaultLocale)

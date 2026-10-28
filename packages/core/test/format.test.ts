@@ -104,6 +104,28 @@ test('localizedPath: a file path keeps no trailing slash, in both modes', () => 
   }
 })
 
+test('localizedPath: a backslash separates segments, so no result starts with // or /\\', () => {
+  const cases: Array<[routing: LocalizedPathOptions['routing'], locale: string, input: string, expected: string]> = [
+    ['prefix-except-default', 'en', '/\\evil.com/', '/evil.com/'],
+    ['prefix-except-default', 'en', '/\\evil.com/x/', '/evil.com/x/'],
+    ['prefix-except-default', 'en', '/de/\\evil.com/', '/evil.com/'],
+    ['prefix-except-default', 'en', '/a\\b/', '/a/b/'],
+    ['prefix-except-default', 'de', '/a\\b/', '/de/a/b/'],
+    ['prefix', 'en', '/de\\about/', '/en/about/'],
+    // A tab or newline is dropped, as the URL parser drops it: `/\t/evil.com/` is not `//evil.com/`.
+    ['prefix-except-default', 'en', '/\t/evil.com/', '/evil.com/'],
+    ['prefix-except-default', 'en', '/\n/evil.com/x/', '/evil.com/x/'],
+    // Encoded, it is one segment and stays as sent.
+    ['prefix-except-default', 'en', '/%5Cevil.com/', '/%5Cevil.com/'],
+    ['prefix-except-default', 'en', '/%5C%5Cevil.com/x/', '/%5C%5Cevil.com/x/'],
+  ]
+  for (const [routing, locale, input, expected] of cases) {
+    const result = localizedPath(locale, input, options(routing))
+    assert.equal(result, expected, `${routing} ${locale} ${input}`)
+    assert.equal(new URL(result, 'https://example.com').host, 'example.com', input)
+  }
+})
+
 test('localizedPath: a ?query and a #hash in the input are kept after the path', () => {
   const cases: Array<[routing: LocalizedPathOptions['routing'], locale: string, input: string, expected: string]> = [
     ['prefix-except-default', 'de', '/about/?x=1#top', '/de/about/?x=1#top'],

@@ -113,15 +113,17 @@ export function isFilePath(pathname: string): boolean {
  * so a prefixed `/de/about/`, a rewritten `/en/about/` and a bare `/about/` all name the
  * same page. 'prefix': `/<locale>/<rest>/`. 'prefix-except-default': the same, except
  * `/<rest>/` (`/` for the root) for the default locale. A `?query` and a `#hash` in the
- * input are kept after the path. The path is rebuilt from its non-empty segments, so the
- * result never starts with `//`.
+ * input are kept after the path. The path is rebuilt from its non-empty segments, read as
+ * the WHATWG parser reads an https path: `\` separates segments like `/`, and a tab or
+ * newline is dropped. So no result starts with `//` or `/\`, even for a decoded path
+ * (Astro's `originPathname` turns `%5C` into `\`); an encoded `%5C` stays one segment.
  */
 export function localizedPath(locale: string, pathname: string, options: LocalizedPathOptions): string {
   const suffixAt = pathname.search(/[?#]/)
-  const path = suffixAt === -1 ? pathname : pathname.slice(0, suffixAt)
+  const path = (suffixAt === -1 ? pathname : pathname.slice(0, suffixAt)).replace(/[\t\n\r]/g, '')
   const suffix = suffixAt === -1 ? '' : pathname.slice(suffixAt)
 
-  const segments = path.split('/').filter(Boolean)
+  const segments = path.split(/[/\\]/).filter(Boolean)
   if (segments.length > 0 && options.isLocale(segments[0]!)) segments.shift()
 
   const rest = segments.length > 0 ? `${segments.join('/')}${isFilePath(path) ? '' : '/'}` : ''

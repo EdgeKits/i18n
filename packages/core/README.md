@@ -71,7 +71,9 @@ The pure helpers are exported from the root and from `./format` (Node-safe): `fm
 `isFilePath`, and `localizedPath`, the path of a page in a locale for either routing mode. A
 leading locale segment is stripped first; the result ends in a slash, except for a file path
 (`isFilePath`: the last segment ends in an extension that starts with a letter, `/rss.xml`, not
-`/blog/v2.0`); a `?query` and a `#hash` in the input are kept after the path:
+`/blog/v2.0`); a `?query` and a `#hash` in the input are kept after the path. Segments are
+read as a URL parser reads an https path (`\` separates them like `/`, a tab or newline is
+dropped), so a decoded `/\evil.com/` gives `/evil.com/` and no result starts with `//`:
 
 ```ts
 import { localizedPath } from '@edgekits/i18n-core/format'

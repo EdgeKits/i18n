@@ -341,6 +341,11 @@ In `'prefix-except-default'` the default locale has no prefix here either: with
 In both modes, rewrites and redirects keep the query string (`/?utm=x` redirects to
 `/en/?utm=x` in `'prefix'`, and renders `/` with `?utm=x` in `'prefix-except-default'`).
 
+A middleware after the i18n one sees `context.url.pathname` as the visitor sent it, still
+percent-encoded (`/%61dmin/` for `/admin/`, under the `/<defaultLocale>/…` rewrite in
+`'prefix-except-default'`): match on decoded paths (`decodeURIComponent`), or on
+`context.routePattern` and `context.params`.
+
 In `'prefix-except-default'`, build canonical and hreflang URLs from `Astro.originPathname`
 (the URL the visitor requested; `Astro.url` is the rewritten `/<defaultLocale>/…`) through
 `localizedPath` from `/runtime`. Astro's own `astro:i18n` URL helpers prefix the default locale
@@ -382,13 +387,18 @@ Two limits:
   `/_server-islands`, `/.well-known` and `/favicon.ico`, each matched on a segment boundary
   (`/apis/` is a page). When Astro answers such a request with its 404 page, the middleware
   sends a plain-text 404 instead; any other response passes unchanged.
+- **A page whose last segment contains a dot is addressed with its trailing slash**
+  (`/team/john.doe/`): without it, `/team/john.doe` is a file path, gets no redirect and no
+  locale. Link to the slash form; `localizedPath` gives it for a path that ends in `/`.
 - **Server islands** (`server:defer`) are fetched from `/_server-islands/…`, a URL without a
   locale: in the island, `Astro.locals.uiLocale` is the default locale. Pass the page's locale
   to the island as a prop.
 - **Error pages stay at the root**: `src/pages/404.astro` (and `500.astro`), not under
   `[lang]`. `/404` and `/500` pass through untouched, and the page reads the locale from
-  `Astro.locals` (the visitor's, when Astro renders it for a missing page under `/de/`). In a
-  page, answer a missing entry with `return Astro.rewrite('/404')`.
+  `Astro.locals` (the visitor's, when Astro renders it for a missing page under `/de/` or for
+  a page that answers `new Response(null, { status: 404 })`). In a page, answer a missing
+  entry with `return Astro.rewrite('/404')`. Keep `404.astro` on-demand: a prerendered one is
+  refused at build time.
 - **Redirects keep the method.** For a request other than GET or HEAD (a form POST), a
   permanent normalisation is a 308 and a negotiated redirect a 307, so the body is resent.
 - **The locale segment is lower case.** `/DE/about/` and `/pt-BR/` redirect permanently, in one
@@ -397,12 +407,13 @@ Two limits:
 - **A response that sets the lang cookie is `Cache-Control: private`** (the URL wins over a
   stale cookie, and the corrected cookie is this visitor's); an existing `no-store` stays.
 
-The integration refuses three Astro settings at build time, each with the reason:
+The integration refuses four Astro settings at build time, each with the reason:
 `trailingSlash: 'never'` (Astro strips the slash the middleware adds: every page would
 redirect forever; `'ignore'` and `'always'` work), a `base` other than `/` (the middleware's
-paths assume the site root), and in `'prefix-except-default'` a prerendered `[lang]` route
-(`export const prerender = true`): root URLs render through a rewrite, and Astro refuses a
-rewrite into a prerendered route.
+paths assume the site root), a prerendered `404.astro` in either mode (Astro serves it without
+the middleware, and `Astro.rewrite('/404')` into it is a 500), and in `'prefix-except-default'`
+a prerendered `[lang]` route (`export const prerender = true`): root URLs render through a
+rewrite, and Astro refuses a rewrite into a prerendered route.
 
 ### Styling the components
 

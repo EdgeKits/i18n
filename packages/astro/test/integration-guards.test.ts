@@ -72,6 +72,21 @@ test("'prefix-except-default': a prerendered [lang] route is refused, naming it"
   )
 })
 
+test('a prerendered /404 route is refused in both modes, saying why; an on-demand one is accepted', () => {
+  for (const routing of ['prefix', 'prefix-except-default'] as const) {
+    assert.throws(
+      () => resolveRoutes([{ pattern: '/404', isPrerendered: true }], routing),
+      (err: Error) =>
+        err.message.startsWith('[@edgekits/astro-i18n] src/pages/404.astro is prerendered') &&
+        err.message.includes('without the middleware') &&
+        err.message.includes("Astro.rewrite('/404')") &&
+        err.message.includes('export const prerender'),
+      routing,
+    )
+    assert.doesNotThrow(() => resolveRoutes([{ pattern: '/404', isPrerendered: false }], routing), routing)
+  }
+})
+
 test('a prerendered root route, or prerendered [lang] routes in prefix mode, are accepted', () => {
   assert.doesNotThrow(() =>
     resolveRoutes([

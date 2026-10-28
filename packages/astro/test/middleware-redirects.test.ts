@@ -14,7 +14,15 @@ import { createI18nMiddleware, i18nMiddleware } from '../src/middleware/i18n.ts'
  * en/de/es/ja, default en, cookie `lang`.
  */
 
-type Fake = { cookie?: string; acceptLanguage?: string; country?: string; method?: string; status?: number }
+type Fake = {
+  cookie?: string
+  acceptLanguage?: string
+  country?: string
+  method?: string
+  status?: number
+  routePattern?: string
+  locals?: Record<string, unknown>
+}
 
 type CookieSet = { name: string; value: string; options: Record<string, unknown> }
 
@@ -32,7 +40,8 @@ async function run(
   const context = {
     request,
     url: new URL(request.url),
-    locals: {} as Record<string, unknown>,
+    routePattern: fake.routePattern,
+    locals: { ...fake.locals } as Record<string, unknown>,
     // Astro's value is not an input: the middleware reads the header itself. For a
     // regional tag (`de-DE`, `es-MX`) undefined is what Astro returns, since it filters
     // Accept-Language down to exact matches of its `i18n.locales` before picking one.
@@ -189,6 +198,20 @@ test('prefix: /404 and /500 pass through untouched, with the default locale in l
   }
   const de = await run('/de/404/')
   assert.equal(de.nextCalled, true)
+})
+
+test('prefix: the error page re-entry (the original path, routePattern /404 or /500) is served, not redirected', async () => {
+  for (const [path, routePattern] of [
+    ['/missing/', '/404'],
+    ['/zz/about/', '/404'],
+    ['/de/broken/', '/500'],
+  ]) {
+    const locals = { uiLocale: 'de', translationLocale: 'de' }
+    const { response, nextCalled } = await run(path!, { routePattern, status: 404, locals, acceptLanguage: 'ja' })
+    assert.equal(nextCalled, true, path)
+    assert.equal(response.status, 404, path)
+    assert.equal(response.headers.get('Location'), null, path)
+  }
 })
 
 test('prefix: POST without a locale is 307, a missing trailing slash 308', async () => {

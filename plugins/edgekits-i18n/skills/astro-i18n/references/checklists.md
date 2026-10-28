@@ -15,7 +15,7 @@ package is installed; `npx edgekits-i18n --help` lists the CLI.
 - [ ] Every locale code is **lowercase**, in the config and in the `locales/*` folder names.
 - [ ] Route layout: every page is under `src/pages/[lang]/`; nothing is left at
       `src/pages/*.astro` but the error pages (`404.astro`, `500.astro`: they stay at the
-      root and read the locale from `Astro.locals`), and only non-localized endpoints
+      root, on-demand, and read the locale from `Astro.locals`), and only non-localized endpoints
       (`robots.txt`, `sitemap.xml`, `/api/*`) remain at the root. A missing entry answers
       `return Astro.rewrite('/404')`. No layout hard-codes `<html lang>`.
 - [ ] Flags: every configured `countryCode` has its SVG in `public/flags/` and the
