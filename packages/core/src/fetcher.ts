@@ -40,6 +40,14 @@ export type FetcherInputs<L extends string> = {
 
 const KV_JSON_OPTIONS = { type: 'json' as const }
 
+// The most keys one KV bulk read accepts.
+const KV_BATCH_LIMIT = 100
+
+// A value read from KV: a year, until `migrate` purges it. A key KV does not have (a locale
+// without that namespace): a `null` marker for a minute, so a later `seed` shows without a purge.
+const CACHE_CONTROL_VALUE = 'public, s-maxage=31536000, immutable'
+const CACHE_CONTROL_MISSING = 'public, s-maxage=60'
+
 export function createFetchTranslations<L extends string>({
   fallbacks: FALLBACKS,
   bindings,
@@ -49,10 +57,15 @@ export function createFetchTranslations<L extends string>({
   /**
    * Fetch translations from KV for a given locale and list of namespaces.
    *
-   * Cache strategy — per-namespace static cache keys:
+   * Cache strategy — per-namespace cache keys, versioned by entry format:
    *
-   * Each namespace is cached individually under a static (non-versioned) URL:
-   *   https://<keyPrefix>/<encodeURIComponent(i18n:<locale>:<ns>)>
+   * Each namespace is cached individually under
+   *   https://<keyPrefix>/<encodeURIComponent(i18n:v2:<locale>:<ns>)>
+   *
+   * An entry holds what KV holds: the raw value of the namespace's key, or a `null`
+   * marker when KV has none (cached for 60 s). Never the merged namespace: the
+   * compiled fallback is merged on every read, so a fallback change reaches every
+   * locale on the next deploy (ADR-0033).
    *
    * Cache invalidation is handled explicitly by the Cloudflare Purge API
    * in `edgekits-i18n migrate` — only namespaces whose content actually changed
@@ -63,19 +76,19 @@ export function createFetchTranslations<L extends string>({
    *   FALLBACK_* → return immediately. Zero KV reads.
    *
    * Partial or full cache miss:
-   *   Missing namespaces collected → single KV getAll() batch →
-   *   merge with FALLBACK_* → individual cache.put() per namespace → return.
+   *   Missing namespaces collected → KV bulk reads of at most 100 keys, in
+   *   parallel → merge with FALLBACK_* → individual cache.put() of the raw value
+   *   per namespace → return.
    *
    * Every namespace — cached or freshly read — is assembled through
    * assembleNamespace(), so a cache HIT is merged with FALLBACK_* exactly like a
-   * miss. An entry cached before a schema addition therefore degrades to
-   * default-locale text for the keys it predates instead of yielding `undefined`
+   * miss: a newer fallback key shows as default-locale text instead of `undefined`
    * (ADR-0014).
    *
-   * KV unavailable:
-   *   Falls back to FALLBACK_* compiled dictionaries (always available), and caches
-   *   nothing: only values read from KV are written to the cache.
-   *   If none were generated, returns empty objects per namespace — no crash.
+   * KV unavailable (per bulk read):
+   *   That read's namespaces fall back to FALLBACK_* compiled dictionaries (always
+   *   available), and none of them is cached: only values read from KV are written
+   *   to the cache. If none were generated, returns empty objects — no crash.
    */
   async function fetchTranslations<N extends Namespace>(locale: L, namespaces: readonly N[]): Promise<PickSchema<N>> {
     const useCache = bindings.cacheEnabled
@@ -125,9 +138,8 @@ export function createFetchTranslations<L extends string>({
 
     for (const { ns, data, hit } of cacheResults) {
       if (hit) {
-        // Cached entries are merged with FALLBACK_* too. A namespace cached before
-        // a schema addition is missing the newer keys; without this merge it would
-        // reach pages as-is and any read of a new key would throw (ADR-0014).
+        // The raw KV value (or a null marker: the fallback alone), merged with the
+        // current FALLBACK_* like a miss (ADR-0014, ADR-0033).
         ;(finalData as any)[ns] = assembleNamespace(data, getFallback(ns))
       } else {
         missingNamespaces.push(ns)
@@ -147,22 +159,12 @@ export function createFetchTranslations<L extends string>({
     })
 
     // ---------------------------------------------------------------------------
-    // 3. Batch KV read for missing namespaces only
+    // 3. Batched KV reads for missing namespaces only
     // ---------------------------------------------------------------------------
 
     const missingKvKeys = missingNamespaces.map((ns) => buildTranslationKvKey(locale, ns))
 
-    let kvResults = new Map<string, unknown | null>()
-    let kvFailed = false
-
-    try {
-      kvResults = (await bindings.kv.get(missingKvKeys, KV_JSON_OPTIONS)) as Map<string, unknown | null>
-
-      debug('i18n KV batch OK', { locale, missingNamespaces })
-    } catch (error) {
-      kvFailed = true
-      debug('i18n KV ERROR, using FALLBACK_* for missing namespaces', error)
-    }
+    const { values: kvResults, failed: failedKvKeys } = await readKv(missingKvKeys)
 
     // ---------------------------------------------------------------------------
     // 4. Assemble missing namespaces + schedule individual cache writes
@@ -173,34 +175,32 @@ export function createFetchTranslations<L extends string>({
     for (let i = 0; i < missingNamespaces.length; i++) {
       const ns = missingNamespaces[i] as N
       const kvKey = missingKvKeys[i] as string
+      const kvFailed = failedKvKeys.has(kvKey)
 
-      // Use KV value if available, otherwise empty object (fallback will fill it)
-      const kvValue = kvFailed ? {} : ((kvResults.get(kvKey) as object) ?? {})
+      // The KV value, or null when KV has none or its read failed (the fallback fills it)
+      const kvValue = kvFailed ? null : (kvResults.get(kvKey) ?? null)
 
       // Merge with FALLBACK_* compiled dictionary if present
       const fallback = getFallback(ns)
-
-      const nsData = assembleNamespace(kvValue, fallback)
 
       if (kvFailed && !fallback) {
         debug(`i18n namespace "${ns}" unavailable: KV failed and no fallback`)
       }
 
-      ;(finalData as any)[ns] = nsData
+      ;(finalData as any)[ns] = assembleNamespace(kvValue, fallback)
 
-      // Only a value that came from KV is cached. After a KV failure nsData is the
-      // compiled fallback alone (the default locale's text, whatever `locale` asked for),
-      // and an immutable year-long entry would serve it until the next purge.
+      // Only what KV answered is cached. After a KV failure there is no answer: a null
+      // marker would hide the namespace's real value for a minute.
       if (kvFailed) continue
 
-      // Cache the resolved namespace individually with a long TTL.
-      // Invalidation is handled explicitly via Cloudflare Purge API —
-      // no TTL-based expiry needed here.
+      // Cache the raw KV value, never the merged namespace: the fallback is merged on
+      // every read. A value lives until the Purge API removes it, a missing key's null
+      // marker for a minute.
       const cacheRequest = buildTranslationCacheRequest(locale, ns)
-      const response = new Response(JSON.stringify(nsData), {
+      const response = new Response(JSON.stringify(kvValue), {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'public, s-maxage=31536000, immutable',
+          'Cache-Control': kvValue === null ? CACHE_CONTROL_MISSING : CACHE_CONTROL_VALUE,
         },
       })
 
@@ -223,8 +223,9 @@ export function createFetchTranslations<L extends string>({
       bindings.waitUntil(Promise.all(putPromises))
 
       debug('i18n cache PUT scheduled', { locale, missingNamespaces })
-    } else if (kvFailed) {
-      debug('i18n cache PUT skipped: KV failed, the fallbacks are not cached', { locale, missingNamespaces })
+    }
+    if (failedKvKeys.size > 0) {
+      debug('i18n cache PUT skipped where KV failed: the fallbacks are not cached', { locale, failedKvKeys })
     }
 
     return finalData as PickSchema<N>
@@ -241,29 +242,48 @@ export function createFetchTranslations<L extends string>({
   async function fetchAllFromKV<N extends Namespace>(locale: L, namespaces: readonly N[]): Promise<PickSchema<N>> {
     const keys = namespaces.map((ns) => buildTranslationKvKey(locale, ns))
 
-    let kvResults = new Map<string, unknown | null>()
-    let kvFailed = false
-
-    try {
-      kvResults = (await bindings.kv.get(keys, KV_JSON_OPTIONS)) as Map<string, unknown | null>
-    } catch (error) {
-      kvFailed = true
-      debug('i18n KV ERROR (cache bypassed), using FALLBACK_* for all namespaces', error)
-    }
-
-    if (kvFailed) {
-      return buildFallbackOnly(namespaces)
-    }
+    const { values: kvResults, failed: failedKvKeys } = await readKv(keys)
 
     const data: Partial<PickSchema<N>> = {}
 
     for (let i = 0; i < namespaces.length; i++) {
-      const ns = namespaces[i]
-      const kvValue = kvResults.get(keys[i] as string) as object | null
-      ;(data as any)[ns] = assembleNamespace(kvValue, getFallback(ns as N))
+      const ns = namespaces[i] as N
+      const key = keys[i] as string
+      // A namespace whose read failed gets its compiled fallback alone.
+      ;(data as any)[ns] = failedKvKeys.has(key)
+        ? (getFallback(ns) ?? {})
+        : assembleNamespace(kvResults.get(key) ?? null, getFallback(ns))
     }
 
     return data as PickSchema<N>
+  }
+
+  /**
+   * Read `keys` from KV in bulk reads of at most KV_BATCH_LIMIT keys, in parallel. A read
+   * that throws marks its own keys failed; the other reads' values still arrive.
+   */
+  async function readKv(keys: readonly string[]): Promise<{ values: Map<string, unknown>; failed: Set<string> }> {
+    const batches: string[][] = []
+    for (let i = 0; i < keys.length; i += KV_BATCH_LIMIT) {
+      batches.push(keys.slice(i, i + KV_BATCH_LIMIT))
+    }
+
+    const values = new Map<string, unknown>()
+    const failed = new Set<string>()
+
+    await Promise.all(
+      batches.map(async (batch) => {
+        try {
+          for (const [key, value] of await bindings.kv.get(batch, KV_JSON_OPTIONS)) values.set(key, value)
+          debug('i18n KV batch OK', { keys: batch.length })
+        } catch (error) {
+          for (const key of batch) failed.add(key)
+          debug('i18n KV ERROR, using FALLBACK_* for this batch', error)
+        }
+      }),
+    )
+
+    return { values, failed }
   }
 
   /**
@@ -271,20 +291,6 @@ export function createFetchTranslations<L extends string>({
    */
   function getFallback(ns: Namespace): unknown {
     return FALLBACKS[fallbackIdentifier(String(ns))]
-  }
-
-  /**
-   * Build a payload using only FALLBACK_* compiled dictionaries.
-   * Used when KV is completely unavailable.
-   */
-  function buildFallbackOnly<N extends Namespace>(namespaces: readonly N[]): PickSchema<N> {
-    const data: Partial<PickSchema<N>> = {}
-
-    for (const ns of namespaces) {
-      ;(data as any)[ns] = getFallback(ns) ?? {}
-    }
-
-    return data as PickSchema<N>
   }
 
   // ---------------------------------------------------------------------------

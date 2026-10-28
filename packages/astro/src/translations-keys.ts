@@ -6,6 +6,6 @@ import { i18n } from './instance'
  * Purge API.
  *
  * Formats: <keyPrefix>:<namespace>:<locale> and
- * https://<keyPrefix>/<encodeURIComponent(i18n:<locale>:<namespace>)>
+ * https://<keyPrefix>/<encodeURIComponent(i18n:v2:<locale>:<namespace>)>
  */
 export const { buildTranslationKvKey, buildTranslationCacheUrl, buildTranslationCacheRequest } = i18n

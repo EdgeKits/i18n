@@ -10,9 +10,13 @@ export function formatTranslationKvKey(keyPrefix: string, locale: string, ns: st
   return `${keyPrefix}:${ns}:${locale}`
 }
 
-// Format: https://<keyPrefix>/<encodeURIComponent(i18n:<locale>:<namespace>)>
+// The cache entry format: `v2` entries hold the raw KV value (ADR-0033). 0.2.x wrote merged
+// namespaces under the unversioned `i18n:<locale>:<namespace>`, which is never read again.
+const CACHE_FORMAT = 'v2'
+
+// Format: https://<keyPrefix>/<encodeURIComponent(i18n:v2:<locale>:<namespace>)>
 export function formatTranslationCacheUrl(keyPrefix: string, locale: string, ns: string): string {
-  const cacheId = `i18n:${locale}:${ns}`
+  const cacheId = `i18n:${CACHE_FORMAT}:${locale}:${ns}`
   return `https://${keyPrefix}/${encodeURIComponent(cacheId)}`
 }
 

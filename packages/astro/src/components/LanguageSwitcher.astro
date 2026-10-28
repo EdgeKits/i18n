@@ -189,7 +189,7 @@ const hasChoice = SUPPORTED_LOCALES.length > 1
       // must stay free of Set-Cookie so the HTML edge cache can serve it), so
       // the switcher is the place where the preference is born. Not httpOnly on
       // either side (cookie-storage.ts): the server validates it, never trusts it.
-      document.cookie = `${cookieName}=${lang}; path=/; max-age=${cookieMaxAge}; SameSite=Lax; Secure`
+      document.cookie = `${cookieName}=${lang}; path=/; max-age=${cookieMaxAge}; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`
 
       window.location.href = this.localizedPath(window.location.pathname, lang)
     }

@@ -2,25 +2,25 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// Keys that would reach an object's prototype instead of its own properties. JSON.parse
-// creates `__proto__` as an own key, so a KV value could carry one.
-const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
-
 /**
  * Deep-merge two dictionaries.
  * - `base` provides known structure (fallback)
  * - `overrides` can provide partial values
  * - Both types are preserved and merged correctly
- * - `__proto__`, `constructor` and `prototype` keys in `overrides` are skipped
+ * - `__proto__` in `overrides` is skipped: JSON.parse creates it as an own key, so a KV
+ *   value could carry one, and assigning it would replace the result's prototype.
+ *   `constructor` and `prototype` are ordinary keys: assigning them on the fresh result
+ *   object creates own properties and reaches no prototype.
  */
 export function deepMerge<A extends object, B extends Partial<A>>(base: A, overrides: B): A {
   const result: any = { ...base }
 
   for (const key of Object.keys(overrides) as (keyof A)[]) {
-    if (UNSAFE_KEYS.has(key as string)) continue
+    if (key === '__proto__') continue
 
     const overrideValue = overrides[key]
-    const baseValue = base[key]
+    // Own keys only: `base.constructor` would otherwise be the inherited `Object`.
+    const baseValue = Object.hasOwn(base, key) ? base[key] : undefined
 
     if (overrideValue === undefined) continue
 

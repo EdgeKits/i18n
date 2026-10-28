@@ -80,7 +80,7 @@ test('tolerates null/undefined for either argument', () => {
 })
 
 // Audit 2026-10-12 A08-1: a parsed KV value can carry `__proto__` as an own key.
-test('deepMerge skips __proto__, constructor and prototype keys', () => {
+test('deepMerge skips __proto__ only; constructor and prototype are ordinary own keys', () => {
   const overrides = JSON.parse(
     '{"__proto__": {"polluted": true}, "constructor": {"x": 1}, "prototype": "p", "title": "Hallo"}',
   ) as Record<string, unknown>
@@ -89,10 +89,29 @@ test('deepMerge skips __proto__, constructor and prototype keys', () => {
 
   assert.equal(Object.getPrototypeOf(result), Object.prototype)
   assert.equal((result as { polluted?: unknown }).polluted, undefined)
-  assert.equal(result.constructor, Object)
-  assert.equal(Object.hasOwn(result, 'prototype'), false)
-  assert.deepEqual(result, { title: 'Hallo', nav: { home: 'Home' } })
+  assert.deepEqual(result.constructor, { x: 1 })
+  assert.equal(Object.hasOwn(result, 'prototype'), true)
+  assert.deepEqual(result, { title: 'Hallo', nav: { home: 'Home' }, constructor: { x: 1 }, prototype: 'p' })
   assert.equal(({} as { polluted?: unknown }).polluted, undefined, 'Object.prototype untouched')
+  assert.equal(({} as object).constructor, Object, 'Object.prototype.constructor untouched')
+})
+
+test('a translated "constructor" key is kept over its fallback, nested too', () => {
+  const fallback = { constructor: 'Constructor', form: { prototype: 'Prototype' } }
+  const de = JSON.parse('{"constructor": "Konstruktor", "form": {"prototype": "Prototyp"}}') as unknown
+
+  assert.deepEqual(assembleNamespace(de, fallback), { constructor: 'Konstruktor', form: { prototype: 'Prototyp' } })
+  assert.deepEqual(assembleNamespace(null, fallback), fallback)
+})
+
+test('a __proto__ key never changes the result prototype, at any depth', () => {
+  const de = JSON.parse('{"__proto__": {"title": "x"}, "nav": {"__proto__": {"home": "x"}}}') as unknown
+
+  const result = assembleNamespace(de, { title: 'Hello', nav: { home: 'Home' } }) as Record<string, any>
+
+  assert.equal(Object.getPrototypeOf(result), Object.prototype)
+  assert.equal(Object.getPrototypeOf(result.nav), Object.prototype)
+  assert.deepEqual(result, { title: 'Hello', nav: { home: 'Home' } })
 })
 
 test('arrays are values: an override replaces the whole list, no element merge', () => {

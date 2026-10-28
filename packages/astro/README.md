@@ -801,10 +801,12 @@ under their own terms. EdgeKits runs no service behind this plugin.
 A request reaches the middleware, which settles the URL's locale (redirecting when there is
 none) and sets `uiLocale` and `translationLocale` on `Astro.locals`. A page asks
 `fetchTranslations` for the namespaces it renders. Each namespace is looked up in the Workers
-Cache API under `https://<keyPrefix>/…`; the misses are read from KV in one batch, merged over
-the compiled default-locale fallbacks, returned, and written back to the cache in the
-background. Cached entries live for a year (`s-maxage=31536000, immutable`): `migrate` purges the ones whose content
-changed, and leaves the rest warm. If KV cannot be reached, the compiled fallbacks render the
+Cache API under `https://<keyPrefix>/…`; the misses are read from KV in batches of up to 100
+keys, and their KV values are written back to the cache in the background. Every namespace,
+cached or fresh, is merged over the compiled default-locale fallbacks when it is read, so a new
+default-locale key shows in every locale on the next deploy. A cached value lives for a year
+(`s-maxage=31536000, immutable`): `migrate` purges the ones whose content changed, and leaves
+the rest warm. A namespace KV does not have is cached as missing for 60 seconds. If KV cannot be reached, the compiled fallbacks render the
 default locale's text instead of an error.
 
 ## License

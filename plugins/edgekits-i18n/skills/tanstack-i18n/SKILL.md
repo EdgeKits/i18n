@@ -57,7 +57,9 @@ wait, in every mode. If asking is impossible, stop and print the open questions.
    `load(getRequest(), data)`.
 4. The root route: its loader fetches `common`; its component wraps the app in `I18nProvider`
    with `locale`, `translations`, `languages` (`localesOf(config).LANGUAGES`) and `cookie`
-   (`config.cookie`).
+   (`config.cookie`). `<html lang>` is `locale`, the UI locale; the loader's
+   `translationLocale` is the one the text was read in (the default for a locale without
+   translations).
 5. A page: its loader fetches its own namespaces, an inner `I18nProvider` holds them, and
    components read them with `useT('<namespace>')`.
 
@@ -86,7 +88,8 @@ purge zone are shared. Commit `.i18n-hashes.json` next to the config after each 
 
 1. Create `<localesDir>/<default>/<namespace>.json` in the shared folder (this types it), then
    the same file in each other locale.
-2. `npx edgekits-i18n bundle --config … --wrangler …` (or `seed` to also fill local KV).
+2. `npx edgekits-i18n seed --config … --wrangler …` (types and local KV). A namespace requested
+   before its seed is cached as missing for 60 s locally: wait a minute, then reload.
 3. Request it in the route's loader (`getTranslations({ data: ['<namespace>'] })`), wrap the
    route in an `I18nProvider` with its `translations`, and read it with `useT('<namespace>')`.
 

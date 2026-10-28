@@ -19,6 +19,8 @@ type Setup = {
   cacheEnabled?: boolean
   noCache?: boolean
   kvThrows?: boolean
+  // Throws for the batches it returns true for, reads the others.
+  kvThrowsFor?: (keys: string[]) => boolean
 }
 
 const RUNTIME_CONSTANTS = { NAMESPACE_KEYS: [], LOCALES_WITH_TRANSLATIONS: [], FULLY_TRANSLATED_LOCALES: [] }
@@ -33,7 +35,7 @@ function setup(options: Setup = {}) {
   const kv: TranslationsKv = {
     async get(keys) {
       kvCalls.push(keys)
-      if (options.kvThrows) throw new Error('KV unavailable')
+      if (options.kvThrows || options.kvThrowsFor?.(keys)) throw new Error('KV unavailable')
       return new Map(keys.map((key) => [key, kvStore.get(key) ?? null]))
     },
   }
@@ -189,6 +191,97 @@ test('a cache hit is merged with a newer fallback key (ADR-0014)', async () => {
 
   assert.deepEqual(await i18n.fetchTranslations('de', ['common']), { common: { title: 'Hallo', added: 'New key' } })
   assert.deepEqual(kvCalls, [])
+})
+
+test('a cache entry holds the raw KV value: a later fallback change reaches the cached locale', async () => {
+  const first = setup({
+    kv: { [kvKey('common')]: { title: 'Hallo' } },
+    fallbacks: { FALLBACK_COMMON: { title: 'Hello', footer: 'Old footer' } },
+  })
+  assert.deepEqual(await first.i18n.fetchTranslations('de', ['common']), {
+    common: { title: 'Hallo', footer: 'Old footer' },
+  })
+  await Promise.all(first.scheduled)
+  assert.deepEqual(
+    first.puts.map(({ body }) => body),
+    [{ title: 'Hallo' }],
+    'the KV value, not the merged namespace',
+  )
+
+  // The next deploy: the same edge cache, a new compiled fallback.
+  const next = setup({
+    cached: { [cacheUrl('common')]: first.puts[0]!.body },
+    fallbacks: { FALLBACK_COMMON: { title: 'Hello', footer: 'New footer' } },
+  })
+  assert.deepEqual(await next.i18n.fetchTranslations('de', ['common']), {
+    common: { title: 'Hallo', footer: 'New footer' },
+  })
+  assert.deepEqual(next.kvCalls, [])
+})
+
+test('a namespace KV does not have: a null marker cached for 60 s, the fallback served on miss and hit', async () => {
+  const { i18n, kvCalls, puts, scheduled } = setup({ fallbacks: { FALLBACK_BLOG: { heading: 'Blog' } } })
+
+  assert.deepEqual(await i18n.fetchTranslations('de', ['blog']), { blog: { heading: 'Blog' } })
+  await Promise.all(scheduled)
+  assert.deepEqual(
+    puts.map(({ url, body, headers }) => [url, body, headers['cache-control']]),
+    [[cacheUrl('blog'), null, 'public, s-maxage=60']],
+  )
+
+  assert.deepEqual(await i18n.fetchTranslations('de', ['blog']), { blog: { heading: 'Blog' } })
+  assert.deepEqual(kvCalls, [[kvKey('blog')]], 'the marker is a hit: no second KV read')
+})
+
+const MANY = Array.from({ length: 150 }, (_, i) => `ns${i}`)
+
+test('150 namespaces: two KV reads of 100 and 50, with the cache and without', async () => {
+  for (const options of [{}, { cacheEnabled: false }, { noCache: true }] satisfies Setup[]) {
+    const { i18n, kvCalls } = setup({ ...options, kv: { [kvKey('ns149')]: { v: 'last' } } })
+
+    const data = (await i18n.fetchTranslations('de', MANY)) as Record<string, unknown>
+
+    assert.deepEqual(
+      kvCalls.map((keys) => keys.length),
+      [100, 50],
+    )
+    assert.deepEqual(kvCalls.flat(), MANY.map(kvKey))
+    assert.deepEqual(data.ns149, { v: 'last' })
+  }
+})
+
+test('a failing KV batch falls back for its own namespaces only, and caches none of them', async () => {
+  const fallbacks = { FALLBACK_NS0: { v: 'fallback' }, FALLBACK_NS100: { v: 'fallback' } }
+  const kv = { [kvKey('ns0')]: { v: 'first batch' }, [kvKey('ns100')]: { v: 'second batch' } }
+  const kvThrowsFor = (keys: string[]) => keys.includes(kvKey('ns0'))
+
+  for (const options of [{}, { cacheEnabled: false }] satisfies Setup[]) {
+    const { i18n, puts, scheduled } = setup({ ...options, kv, fallbacks, kvThrowsFor })
+
+    const data = (await i18n.fetchTranslations('de', MANY)) as Record<string, unknown>
+
+    assert.deepEqual(data.ns0, { v: 'fallback' })
+    assert.deepEqual(data.ns99, {})
+    assert.deepEqual(data.ns100, { v: 'second batch' })
+    await Promise.all(scheduled)
+    assert.deepEqual(
+      puts.map(({ url }) => url),
+      options.cacheEnabled === false ? [] : MANY.slice(100).map(cacheUrl),
+    )
+  }
+})
+
+test('an entry under the 0.2.x cache URL is never looked up', async () => {
+  const oldUrl = 'https://edgekits.dev/i18n%3Ade%3Acommon'
+  const { i18n, cacheCalls, kvCalls } = setup({
+    cached: { [oldUrl]: { title: 'a merged 0.2.x snapshot' } },
+    kv: { [kvKey('common')]: { title: 'Hallo' } },
+  })
+
+  assert.deepEqual(await i18n.fetchTranslations('de', ['common']), { common: { title: 'Hallo' } })
+  assert.deepEqual(cacheCalls.slice(0, 1), [`match ${cacheUrl('common')}`])
+  assert.ok(cacheCalls.every((call) => !call.endsWith(` ${oldUrl}`)))
+  assert.deepEqual(kvCalls, [[kvKey('common')]])
 })
 
 test('bindings are read at call time, never when the instance is created', async () => {

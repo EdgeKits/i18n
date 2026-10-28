@@ -85,6 +85,12 @@ export default app
 Hand `c.req.raw` to TanStack unchanged: server functions live under `/_serverFn/`, and that
 path is case-sensitive.
 
+A `userPreference` that throws or rejects counts as no preference: the request resolves through
+Accept-Language, and the error is logged once with `console.warn` (whatever `DEBUG_I18N` says: a
+failing hook is an application error). To report it your own way, pass
+`onUserPreferenceError: (error, request) => …` next to `userPreference`, to the middleware and
+to the loader alike; it is called once per failure, instead of the warning.
+
 ## 3. The server function: `src/i18n/server.ts`
 
 ```ts
@@ -154,6 +160,12 @@ function Root() {
 
 The config and `localesOf` are pure, safe to import on the client. `languages` and `cookie` are
 given once, here.
+
+The loader returns `{ locale, translationLocale, translations }`. `locale` is the UI locale:
+`<html lang>`, the provider and the switcher take it. `translationLocale` is the locale the
+translations were read in: `locale` when it has translations (the generated
+`LOCALES_WITH_TRANSLATIONS`), otherwise the default locale; compare the two to show a "not
+translated yet" notice.
 
 ## 5. A page: `src/routes/index.tsx`
 

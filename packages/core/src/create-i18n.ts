@@ -82,10 +82,10 @@ export function createI18n<const C extends I18nConfig>(
 
   /**
    * Single source of truth for translation cache URL construction, shared with the CLI
-   * (Purge API) through `key-format.ts`. The URL is static, not versioned: invalidation
-   * is the explicit purge in `edgekits-i18n migrate`.
+   * (Purge API) through `key-format.ts`. The URL carries the entry format (`v2`), not a
+   * content version: invalidation is the explicit purge in `edgekits-i18n migrate`.
    *
-   * Format: https://<keyPrefix>/<encodeURIComponent(i18n:<locale>:<namespace>)>
+   * Format: https://<keyPrefix>/<encodeURIComponent(i18n:v2:<locale>:<namespace>)>
    */
   function buildTranslationCacheUrl(locale: L, ns: Namespace): string {
     return formatTranslationCacheUrl(config.keyPrefix, locale, ns)

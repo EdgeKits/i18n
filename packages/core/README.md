@@ -1,9 +1,10 @@
 # @edgekits/i18n-core
 
 The EdgeKits edge-native i18n engine, free of any framework. Translations live as data in
-Workers KV, one JSON value per locale and namespace; each namespace is cached at the edge under
-its own URL and purged through the Cloudflare Purge API only when its content changed; the
-default locale's JSON files define a typed schema. After a KV error the compiled fallback is
+Workers KV, one JSON value per locale and namespace; each namespace's KV value is cached at the
+edge under its own URL (merged with the compiled fallback on every read) and purged through the
+Cloudflare Purge API only when its content changed; a namespace KV does not have is cached as
+missing for 60 seconds; the default locale's JSON files define a typed schema. After a KV error the compiled fallback is
 served and not cached, so the next request reads KV again. This package holds the config validation,
 the fetcher, locale resolution, the lang cookie, the format helpers and the `edgekits-i18n`
 CLI. A framework adapter builds on it: for Astro, use
@@ -44,8 +45,19 @@ export const i18n = createI18n(
   },
 )
 
-const { common } = await i18n.fetchTranslations('de', ['common'])
+export default {
+  async fetch(request: Request): Promise<Response> {
+    // Inside a request, never at module scope: on Workers, `env` and the edge cache belong
+    // to the request.
+    const { common } = await i18n.fetchTranslations('de', ['common'])
+    return Response.json(common)
+  },
+}
 ```
+
+The edge cache URL's host is `keyPrefix` (`https://<keyPrefix>/…`) and the cache is per zone: two
+Workers on one zone that read different KV namespaces (production and staging, say) need
+different `keyPrefix` values, or each serves the other's cached translations.
 
 The instance also carries the locale constants (`DEFAULT_LOCALE`, `SUPPORTED_LOCALES`, `NAMESPACE_KEYS`,
 `LANGUAGES`), `isLocale`/`parseLocale`, the fallback cascade (`resolveFallbackLocale`), the

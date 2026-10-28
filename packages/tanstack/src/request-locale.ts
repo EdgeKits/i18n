@@ -18,6 +18,10 @@ export type RequestLocaleOptions = {
   // before Accept-Language. Returns a locale string or null; the value is parsed, never
   // trusted.
   userPreference?: (request: Request) => string | null | undefined | Promise<string | null | undefined>
+  // Called once when `userPreference` throws or rejects; the cascade then continues with no
+  // preference. Absent: a `console.warn`, whatever DEBUG_I18N says (an application error
+  // belongs in production logs).
+  onUserPreferenceError?: (error: unknown, request: Request) => void
 }
 
 /**
@@ -27,7 +31,8 @@ export type RequestLocaleOptions = {
  * `userPreference`, then Accept-Language, then the default locale.
  *
  * `userPreference` may be async, the core's cascade is not: it is awaited here, and only
- * when the cookie carries no valid locale.
+ * when the cookie carries no valid locale. A hook that throws or rejects counts as no
+ * preference (see `onUserPreferenceError`).
  */
 export async function resolveRequestLocale<L extends string>(
   i18n: RequestI18n<L>,
@@ -36,7 +41,7 @@ export async function resolveRequestLocale<L extends string>(
 ): Promise<L> {
   // `getCookie` reads `c.req.raw` only: the loader has a Request and no Hono context.
   const cookieLocale = i18n.parseLocale(getCookie({ req: { raw: request } } as Context, i18n.LANG_COOKIE_NAME))
-  const preferred = cookieLocale ? null : i18n.parseLocale((await options.userPreference?.(request)) ?? null)
+  const preferred = cookieLocale ? null : i18n.parseLocale((await readUserPreference(request, options)) ?? null)
 
   return i18n.resolveFallbackLocale({
     cookieLocale: () => cookieLocale,
@@ -44,4 +49,14 @@ export async function resolveRequestLocale<L extends string>(
     acceptLanguage: () => request.headers.get('accept-language'),
     country: () => undefined,
   })
+}
+
+async function readUserPreference(request: Request, options: RequestLocaleOptions): Promise<string | null | undefined> {
+  try {
+    return await options.userPreference?.(request)
+  } catch (error) {
+    if (options.onUserPreferenceError) options.onUserPreferenceError(error, request)
+    else console.warn('[@edgekits/tanstack-i18n] userPreference failed; falling back to Accept-Language', error)
+    return null
+  }
 }

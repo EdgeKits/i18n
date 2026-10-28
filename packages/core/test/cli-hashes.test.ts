@@ -33,7 +33,7 @@ test('diff: only namespaces whose content changed are listed', () => {
 
 test('purge list: changed pairs map to the pinned cache URLs', () => {
   assert.deepEqual(purgeUrlsFor(['de:common', 'ja:blog'], 'edgekits.dev'), [
-    'https://edgekits.dev/i18n%3Ade%3Acommon',
-    'https://edgekits.dev/i18n%3Aja%3Ablog',
+    'https://edgekits.dev/i18n%3Av2%3Ade%3Acommon',
+    'https://edgekits.dev/i18n%3Av2%3Aja%3Ablog',
   ])
 })

@@ -56,7 +56,7 @@ export function LanguageSwitcher({ classes = {}, texts, afterChange }: LanguageS
 
   const select = (next: Locale) => {
     // Not httpOnly: the server reads the value through `parseLocale`, never trusts it.
-    document.cookie = `${cookie.name}=${next}; path=/; max-age=${cookie.maxAge}; SameSite=Lax; Secure`
+    document.cookie = `${cookie.name}=${next}; path=/; max-age=${cookie.maxAge}; SameSite=Lax${location.protocol === 'https:' ? '; Secure' : ''}`
     setOpen(false)
     if (afterChange) afterChange(next)
     else window.location.reload()

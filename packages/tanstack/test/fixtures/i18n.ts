@@ -23,9 +23,13 @@ const RUNTIME_CONSTANTS = {
 
 /**
  * An instance over a Map-backed KV (the core's fetcher-test approach): no edge cache, so
- * every call reads the Map. `kv` maps `<namespace>:<locale>` to the stored JSON.
+ * every call reads the Map. `kv` maps `<namespace>:<locale>` to the stored JSON;
+ * `localesWithTranslations` replaces the generated LOCALES_WITH_TRANSLATIONS.
  */
-export function createFixture(kv: Record<string, unknown> = {}) {
+export function createFixture(
+  kv: Record<string, unknown> = {},
+  localesWithTranslations: readonly string[] = RUNTIME_CONSTANTS.LOCALES_WITH_TRANSLATIONS,
+) {
   const store = new Map<string, unknown>()
   const reads: string[][] = []
   const translationsKv: TranslationsKv = {
@@ -42,7 +46,8 @@ export function createFixture(kv: Record<string, unknown> = {}) {
     debug: false,
   }
 
-  const i18n = createI18n(config, { fallbacks: {}, runtimeConstants: RUNTIME_CONSTANTS }, bindings)
+  const runtimeConstants = { ...RUNTIME_CONSTANTS, LOCALES_WITH_TRANSLATIONS: localesWithTranslations }
+  const i18n = createI18n(config, { fallbacks: {}, runtimeConstants }, bindings)
   for (const [entry, value] of Object.entries(kv)) {
     const [ns = '', locale = ''] = entry.split(':')
     store.set(i18n.buildTranslationKvKey(locale as 'en', ns), value)
