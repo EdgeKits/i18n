@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  assertNoNullValues,
   assertValidNames,
   buildBulkData,
   buildFallbacksContent,
@@ -9,6 +10,7 @@ import {
   buildTypesContent,
   quoteString,
   schemaSourceLocale,
+  translationWarnings,
 } from '../src/cli/generate.ts'
 import { assembleNamespace } from '../src/assemble.ts'
 import { fallbackIdentifier } from '../src/key-format.ts'
@@ -68,9 +70,81 @@ export {}
   )
 })
 
-test('schema: other scalars stay string, in a list too', () => {
-  const content = buildTypesContent({ en: { stats: { count: 3, on: true, years: [2025, 2026] } } }, 'en')
-  assert.match(content, /"count": string;\n {12}"on": string;\n {12}"years": string\[\];/)
+test('schema: numbers and booleans are typed as such, in a list too', () => {
+  const content = buildTypesContent({ en: { stats: { count: 3, on: true, years: [2025, 2026], flags: [true] } } }, 'en')
+  assert.match(content, /"count": number;\n {12}"on": boolean;\n {12}"years": number\[\];\n {12}"flags": boolean\[\];/)
+})
+
+test('schema: an array of objects is the union of its element shapes', () => {
+  const content = buildTypesContent(
+    { en: { plans: { tiers: [{ name: 'Free' }, { name: 'Pro', price: 9 }, { name: 'Team' }] } } },
+    'en',
+  )
+  assert.equal(
+    content,
+    `${HEADER}
+declare global {
+  namespace I18n {
+    export interface Schema {
+      "plans": {
+            "tiers": Array<{
+              "name": string;
+            } | {
+              "name": string;
+              "price": number;
+            }>;
+          };
+    }
+  }
+}
+
+export {}
+`,
+  )
+})
+
+test('schema: a null value stops generation, naming the key path and the file', () => {
+  assert.throws(() => buildTypesContent({ en: { faq: { items: [{ q: 'a', a: null }] } } }, 'en'), {
+    message:
+      'Key "faq.items[0].a" (en/faq.json) is null: it would override the default locale\'s text with null. ' +
+      'Remove the key to fall back, or give it a value.',
+  })
+})
+
+test('names: a null value in any locale is rejected, naming the key path and the file', () => {
+  assert.throws(
+    () => assertNoNullValues({ en: { common: { title: 'Hello' } }, de: { common: { nav: { home: null } } } }),
+    /^Error: Key "common\.nav\.home" \(de\/common\.json\) is null/,
+  )
+  assert.throws(() => assertNoNullValues({ en: { common: { tags: ['a', null] } } }), /Key "common\.tags\[1\]"/)
+  assert.doesNotThrow(() => assertNoNullValues(LOCALE_TREE))
+})
+
+test('names: the namespace "locale" is reserved (FALLBACK_LOCALE), naming the file and the reason', () => {
+  assert.throws(
+    () => assertValidNames({ en: { locale: {} } }, LANGUAGES),
+    (err: Error) =>
+      err.message.startsWith('Namespace "locale" (en/locale.json) is reserved:') &&
+      err.message.includes('FALLBACK_LOCALE'),
+  )
+  assert.doesNotThrow(() => assertValidNames({ en: { locales: {}, 'app.locale': {} } }, LANGUAGES))
+})
+
+test('warnings: a namespace only in other locales, keys the default locale lacks', () => {
+  const tree = {
+    en: { common: { title: 'Hello', nav: { home: 'Home' } } },
+    de: {
+      common: { title: 'Hallo', subtitle: 'x', nav: { home: 'Start', blog: 'Blog', faq: 'FAQ' }, extra: { a: '1' } },
+      promo: { banner: 'Sale' },
+    },
+    ja: { promo: { banner: 'セール' } },
+  }
+  assert.deepEqual(translationWarnings(tree, 'en'), [
+    'Namespace "promo" exists only in de, ja (no en/promo.json): it is not in I18n.Schema and has no fallback.',
+    'de/common.json has 4 keys that en/common.json lacks (not in I18n.Schema): subtitle, nav.blog, nav.faq, …',
+  ])
+  assert.deepEqual(translationWarnings(LOCALE_TREE, 'en'), [])
+  assert.deepEqual(translationWarnings(LOCALE_TREE, 'fr'), [], 'no default-locale tree: nothing to compare')
 })
 
 test('schema: a list that mixes kinds of elements stops generation, naming the key and the file', () => {

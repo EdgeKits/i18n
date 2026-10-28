@@ -7,7 +7,8 @@ import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc
 // ---------------------------------------------------------------------------
 // Wrangler config reader
 // Parses the Worker's wrangler.jsonc (the path `--wrangler` names, ./wrangler.jsonc by
-// default) to extract KV namespace IDs and vars by key.
+// default) for the translations binding and the zone id, at the top level or in one
+// `env.<name>`.
 // Single source of truth — no hardcoded IDs or zone IDs in package.json.
 // ---------------------------------------------------------------------------
 
@@ -36,29 +37,76 @@ function readWranglerConfig(wranglerConfigPath: string): Record<string, unknown>
   return config
 }
 
-export function getKvNamespaceId(wranglerConfigPath: string, binding: string): string {
+type KvNamespace = { binding?: unknown; id?: unknown; preview_id?: unknown }
+
+type WranglerScope = { kv_namespaces?: KvNamespace[]; vars?: Record<string, unknown> }
+
+/** What the CLI reads from the Worker's wrangler config, for one environment or the top level. */
+export type WorkerSettings = {
+  // The binding's `id`: what `migrate` writes, and the key of its purge baseline.
+  kvId: string
+  // The binding's `preview_id`, when set: what `wrangler dev` reads, so what `seed` writes.
+  previewId?: string
+  // `vars.CLOUDFLARE_ZONE_ID` of the same scope.
+  zoneId?: string
+  // Without an environment: the `env.<name>` entries that bind the same name to another id.
+  otherEnvs: string[]
+}
+
+function findBinding(scope: WranglerScope | undefined, binding: string): KvNamespace | undefined {
+  const kvNamespaces = Array.isArray(scope?.kv_namespaces) ? scope.kv_namespaces : []
+  return kvNamespaces.find((kv) => kv?.binding === binding)
+}
+
+/**
+ * The `binding` KV namespace and `CLOUDFLARE_ZONE_ID` of the top level, or of `env.<env>`
+ * when `env` is given: wrangler does not inherit `kv_namespaces` and `vars` into an
+ * environment, so nothing falls back to the top level. Exits, naming the file and the
+ * scope, when the environment or the binding (or its `id`) is missing.
+ */
+export function readWorkerSettings(wranglerConfigPath: string, binding: string, env?: string): WorkerSettings {
   const config = readWranglerConfig(wranglerConfigPath)
-  const kvNamespaces = config.kv_namespaces as
-    | Array<{
-        binding: string
-        id: string
-      }>
-    | undefined
+  const envs = (config.env ?? {}) as Record<string, WranglerScope | undefined>
 
-  const entry = kvNamespaces?.find((kv) => kv.binding === binding)
+  let scope = config as WranglerScope
+  let where = wranglerConfigPath
+  if (env !== undefined) {
+    if (!Object.hasOwn(envs, env) || typeof envs[env] !== 'object' || envs[env] === null) {
+      console.error(`[i18n] Environment "${env}" not found in ${wranglerConfigPath} (no env.${env}).`)
+      process.exit(1)
+    }
+    scope = envs[env]
+    where = `env.${env} of ${wranglerConfigPath}`
+  }
 
+  const entry = findBinding(scope, binding)
   if (!entry) {
-    console.error(`[i18n] KV binding "${binding}" not found in ${wranglerConfigPath}`)
+    console.error(
+      `[i18n] KV binding "${binding}" not found in ${where}` +
+        (env !== undefined ? ' (wrangler does not inherit kv_namespaces into an environment).' : ''),
+    )
+    process.exit(1)
+  }
+  if (typeof entry.id !== 'string') {
+    console.error(`[i18n] KV binding "${binding}" in ${where} has no id.`)
     process.exit(1)
   }
 
-  return entry.id
-}
+  const zoneId = scope.vars?.CLOUDFLARE_ZONE_ID
+  const otherEnvs =
+    env === undefined
+      ? Object.keys(envs).filter((name) => {
+          const other = findBinding(envs[name], binding)
+          return other !== undefined && other.id !== entry.id
+        })
+      : []
 
-export function getWranglerVar(wranglerConfigPath: string, key: string): string | undefined {
-  const config = readWranglerConfig(wranglerConfigPath)
-  const vars = config.vars as Record<string, string> | undefined
-  return vars?.[key]
+  return {
+    kvId: entry.id,
+    previewId: typeof entry.preview_id === 'string' ? entry.preview_id : undefined,
+    zoneId: typeof zoneId === 'string' && zoneId !== '' ? zoneId : undefined,
+    otherEnvs,
+  }
 }
 
 // ---------------------------------------------------------------------------

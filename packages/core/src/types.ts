@@ -14,7 +14,8 @@ export type I18nConfig = {
   defaultLocale: string
   // The lang cookie the middleware keeps in sync with the URL locale.
   cookie: { name: string; maxAge: number }
-  // Prefix of every translation KV key and the host of every edge-cache URL.
+  // Prefix of every translation KV key and the host of every edge-cache URL, so it must be
+  // a URL host as written (lowercase, no scheme, path or space).
   keyPrefix: string
   missingTranslationBanner: boolean
   // URL locale prefixes. The core reads none of this: an adapter interprets it and
@@ -47,8 +48,20 @@ export type LocaleOf<C extends I18nConfig> = Extract<keyof C['languages'], strin
 
 const COUNTRY_CODE = /^[A-Z]{2}$/
 
+// True when `https://<value>` parses with exactly `value` as its host: no scheme, path,
+// port syntax error, space or upper case (the URL parser would change any of them).
+function isOwnUrlHost(value: unknown): boolean {
+  if (typeof value !== 'string' || value === '') return false
+  try {
+    return new URL(`https://${value}`).host === value
+  } catch {
+    return false
+  }
+}
+
 /**
- * Validates and returns the config unchanged. Throws at config time on an empty
+ * Validates and returns the config unchanged. Throws at config time on a `keyPrefix` that
+ * is not a URL host as written, an empty
  * `languages`, a `defaultLocale` or `markdownLocale` that is not one of its keys, a
  * `routing` other than the two modes (absent is valid), or a `countryToLocale` entry whose key is not an uppercase country
  * code or whose value is not one of `languages` (also a type error for a literal config).
@@ -68,6 +81,13 @@ export function defineI18nConfig<const C extends I18nConfig>(
         `[@edgekits/i18n-core] \`languages\` key "${locale}" is not lowercase (use "${locale.toLowerCase()}").`,
       )
     }
+  }
+  if (!isOwnUrlHost(config.keyPrefix)) {
+    throw new Error(
+      `[@edgekits/i18n-core] \`keyPrefix\` ${JSON.stringify(config.keyPrefix)} is not a URL host as written: ` +
+        'it is the host of every edge-cache URL (https://<keyPrefix>/…). Use lowercase letters, digits, dots ' +
+        'and hyphens, with no scheme or path ("example.com", "my-site").',
+    )
   }
   if (!locales.includes(config.defaultLocale)) {
     throw new Error(

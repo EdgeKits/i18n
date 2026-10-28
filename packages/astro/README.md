@@ -75,18 +75,18 @@ export default defineI18nConfig({
 })
 ```
 
-| Field                      | Required | Default                   | Meaning                                                                                                                                                                                                     |
-| -------------------------- | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `languages`                | yes      |                           | `{ [locale]: { name, countryCode? } }`; `countryCode` is optional: the code your flag component receives                                                                                                    |
-| `defaultLocale`            | yes      |                           | one of `languages`; its JSON files define the schema                                                                                                                                                        |
-| `cookie`                   | yes      |                           | `{ name, maxAge }` (seconds) of the language cookie                                                                                                                                                         |
-| `keyPrefix`                | yes      |                           | a hostname of your zone, or a unique name without a dot: KV keys are `<keyPrefix>:<namespace>:<locale>` and every cache URL is `https://<keyPrefix>/…` (see [Deployment targets](#deployment-targets))      |
-| `missingTranslationBanner` | yes      |                           | enables `MissingTranslationBanner`                                                                                                                                                                          |
-| `routing`                  | no       | `'prefix-except-default'` | `'prefix-except-default'`: the default locale at the root (`/about/`), the others prefixed (`/de/about/`); `'prefix'`: every URL starts with its locale (`/en/about/`). See [Routing modes](#routing-modes) |
-| `localesDir`               | no       | `'locales'`               | where the CLI reads `<locale>/<namespace>.json`                                                                                                                                                             |
-| `generatedDir`             | no       | `'src/i18n'`              | where the CLI writes `runtime-constants.ts` and `fallbacks.generated.ts`                                                                                                                                    |
-| `countryToLocale`          | no       | none                      | geo-IP step of the locale fallback (see Reference)                                                                                                                                                          |
-| `markdownLocale`           | no       | none                      | the locale `.md` endpoints are served in (see Reference)                                                                                                                                                    |
+| Field                      | Required | Default                   | Meaning                                                                                                                                                                                                                                                      |
+| -------------------------- | -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `languages`                | yes      |                           | `{ [locale]: { name, countryCode? } }`; `countryCode` is optional: the code your flag component receives                                                                                                                                                     |
+| `defaultLocale`            | yes      |                           | one of `languages`; its JSON files define the schema                                                                                                                                                                                                         |
+| `cookie`                   | yes      |                           | `{ name, maxAge }` (seconds) of the language cookie                                                                                                                                                                                                          |
+| `keyPrefix`                | yes      |                           | a hostname of your zone, or a unique name without a dot, written as a URL host (lowercase, no scheme or path): KV keys are `<keyPrefix>:<namespace>:<locale>` and every cache URL is `https://<keyPrefix>/…` (see [Deployment targets](#deployment-targets)) |
+| `missingTranslationBanner` | yes      |                           | enables `MissingTranslationBanner`                                                                                                                                                                                                                           |
+| `routing`                  | no       | `'prefix-except-default'` | `'prefix-except-default'`: the default locale at the root (`/about/`), the others prefixed (`/de/about/`); `'prefix'`: every URL starts with its locale (`/en/about/`). See [Routing modes](#routing-modes)                                                  |
+| `localesDir`               | no       | `'locales'`               | where the CLI reads `<locale>/<namespace>.json`                                                                                                                                                                                                              |
+| `generatedDir`             | no       | `'src/i18n'`              | where the CLI writes `runtime-constants.ts` and `fallbacks.generated.ts`                                                                                                                                                                                     |
+| `countryToLocale`          | no       | none                      | geo-IP step of the locale fallback (see Reference)                                                                                                                                                                                                           |
+| `markdownLocale`           | no       | none                      | the locale `.md` endpoints are served in (see Reference)                                                                                                                                                                                                     |
 
 Locale codes (the keys of `languages`) are lowercase everywhere: the config, the `locales/`
 folders and the URLs (`pt-br`, not `pt-BR`). `toIetfTag()` from `./format` gives the IETF form
@@ -167,8 +167,10 @@ locales/
 The default locale's files define the schema: their namespaces and keys are the types. Another
 locale may leave keys out; the default locale's text fills the gaps.
 
-Lists are allowed and typed: `["a", "b"]` is `string[]`, a list of objects is `Array<{…}>` from
-its first element, and a locale that has the list replaces it whole.
+Values are typed as written: strings, numbers and booleans. Lists are allowed and typed:
+`["a", "b"]` is `string[]`, a list of objects is `Array<…>`, the union of its element shapes,
+and a locale that has the list replaces it whole. `null` is rejected: leave the key out to fall
+back to the default locale's text.
 
 ### 6. Generate and seed
 
@@ -179,20 +181,21 @@ npx edgekits-i18n seed
 The `edgekits-i18n` command comes from `@edgekits/i18n-core`, which this package depends on, so
 it is in your project's `node_modules/.bin` with no extra install.
 
-| Command                            | Writes                                                                                                              | Then                                                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `edgekits-i18n bundle`             | `i18n-data.json` (the KV payload), `src/i18n.generated.d.ts` (the schema), `<generatedDir>/runtime-constants.ts`    | nothing else                                                                                           |
-| `edgekits-i18n bundle --fallbacks` | the above and `<generatedDir>/fallbacks.generated.ts` (the default locale compiled in, served if KV is unreachable) | nothing else                                                                                           |
-| `edgekits-i18n seed`               | the same as `bundle --fallbacks`                                                                                    | pushes every value to local KV (`wrangler kv bulk put --local`)                                        |
-| `edgekits-i18n migrate`            | the same as `bundle --fallbacks`                                                                                    | pushes to production KV, purges the changed namespaces' edge-cache entries, writes `.i18n-hashes.json` |
+| Command                            | Writes                                                                                                              | Then                                                                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `edgekits-i18n bundle`             | `i18n-data.json` (the KV payload), `src/i18n.generated.d.ts` (the schema), `<generatedDir>/runtime-constants.ts`    | nothing else                                                                                                                                    |
+| `edgekits-i18n bundle --fallbacks` | the above and `<generatedDir>/fallbacks.generated.ts` (the default locale compiled in, served if KV is unreachable) | nothing else                                                                                                                                    |
+| `edgekits-i18n seed`               | the same as `bundle --fallbacks`                                                                                    | pushes every value to local KV (`wrangler kv bulk put --local`; the binding's `preview_id` when set)                                            |
+| `edgekits-i18n migrate`            | the same as `bundle --fallbacks`                                                                                    | pushes to production KV, deletes the keys of removed files, purges the changed namespaces' edge-cache entries twice, writes `.i18n-hashes.json` |
 
 The generated files are ordinary project files: commit them, and run the CLI again after you
 edit a JSON file.
 
-`.i18n-hashes.json` holds one content hash per namespace and locale as of the last successful
-`migrate`; the next `migrate` purges exactly the entries whose hash changed. Rules:
+`.i18n-hashes.json` holds, per KV namespace id, one content hash per namespace and locale as
+of the last successful `migrate`; the next `migrate` purges exactly the entries whose hash
+changed, and deletes the KV keys of files removed since. Rules:
 
-- Only `migrate` writes it, and only after the purge succeeded (or nothing changed). `seed`
+- Only `migrate` writes it, and only after both purges succeeded (or nothing changed). `seed`
   never touches it: local KV is not production.
 - Commit it after every `migrate`. It is the record of what production holds.
 - `migrate` refuses to run while the file has uncommitted changes, since a wrong baseline would
@@ -201,8 +204,11 @@ edit a JSON file.
 
 `migrate` reads the zone ID from `CLOUDFLARE_ZONE_ID` (a var in `wrangler.jsonc` or the
 environment) and the token from `CLOUDFLARE_CACHEPURGE_API_TOKEN` (the environment or
-`.dev.vars`). Without either, it still pushes to KV but skips the purge and leaves
-`.i18n-hashes.json` alone, so the next run retries.
+`.dev.vars`). It purges, waits 65 s for KV to settle (`--purge-delay`), and purges again.
+Without the zone ID or token, or when a purge fails, it still pushes to KV but exits 1 and
+leaves `.i18n-hashes.json` alone, so the next run retries. `--env <name>` reads the binding and
+the zone ID from `env.<name>`. All flags:
+[the core's CLI reference](https://github.com/EdgeKits/i18n/tree/main/packages/core#cli).
 
 ### 7. Use translations in a page
 
@@ -762,9 +768,10 @@ canonical at the original instead of using `noindex`.
   `migrate` wrote it, commit it. If anything else changed it, discard the change with
   `git checkout .i18n-hashes.json` and run `migrate` again. Never edit or delete it to get
   past the check.
-- **`migrate` updated KV but the site shows old copy.** The purge was skipped: the zone is not
-  proxied, or the zone ID or token is missing. Fix it and run `migrate` again; it retries the
-  same purge.
+- **`migrate` exits 1 after "KV is updated; the edge cache is not".** The purge was skipped or
+  failed: the zone ID or token is missing, or the Purge API refused. Fix it and run `migrate`
+  again; it retries the same purge. If it exited 0 and the site still shows old copy, the zone
+  is not proxied.
 - **npm 12: `esbuild` or `workerd` did not install.** npm 12 blocks dependency install
   scripts by default and lists the skipped packages at the end of `npm install`. Both need
   theirs: run `npm install-scripts approve esbuild workerd`, then

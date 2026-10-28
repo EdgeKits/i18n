@@ -289,9 +289,10 @@ canonical at the original instead of using `noindex`.
   `migrate` wrote it, commit it. If anything else changed it, discard the change with
   `git checkout .i18n-hashes.json` and run `migrate` again. Never edit or delete it to get
   past the check.
-- **`migrate` updated KV but the site shows old copy.** The purge was skipped: the zone is not
-  proxied, or the zone ID or token is missing. Fix it and run `migrate` again; it retries the
-  same purge.
+- **`migrate` exits 1 after "KV is updated; the edge cache is not".** The purge was skipped or
+  failed: the zone ID or token is missing, or the Purge API refused. Fix it and run `migrate`
+  again; it retries the same purge. If it exited 0 and the site still shows old copy, the zone
+  is not proxied.
 - **npm 12: `esbuild` or `workerd` did not install.** npm 12 blocks dependency install
   scripts by default and lists the skipped packages at the end of `npm install`. Both need
   theirs: run `npm install-scripts approve esbuild workerd`, then

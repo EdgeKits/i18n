@@ -60,3 +60,21 @@ test('countryCode is optional: a locale with only a name validates', () => {
   const config = defineI18nConfig({ ...BASE, languages: { en: { name: 'English' }, eo: { name: 'Esperanto' } } })
   assert.deepEqual(config.languages.eo, { name: 'Esperanto' })
 })
+
+test('keyPrefix: a URL host as written (it is the edge-cache host) is accepted', () => {
+  for (const keyPrefix of ['edgekits.dev', 'astro-edgekits-core', 'staging.example.com']) {
+    assert.doesNotThrow(() => defineI18nConfig({ ...BASE, keyPrefix }), keyPrefix)
+  }
+})
+
+test('keyPrefix: anything that is not its own URL host is rejected, saying why', () => {
+  for (const keyPrefix of ['i18n:prod', 'a b', 'https://x.com', 'Example.com', '', 'edgekits.dev/'] as const) {
+    assert.throws(
+      () => defineI18nConfig({ ...BASE, keyPrefix }),
+      (err: Error) =>
+        err.message.startsWith(`[@edgekits/i18n-core] \`keyPrefix\` ${JSON.stringify(keyPrefix)} is not a URL host`) &&
+        err.message.includes('https://<keyPrefix>/'),
+      keyPrefix,
+    )
+  }
+})

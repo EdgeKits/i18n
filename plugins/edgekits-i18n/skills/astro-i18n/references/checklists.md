@@ -64,7 +64,8 @@ package is installed; `npx edgekits-i18n --help` lists the CLI.
       it, never print it, never pass it on a command line.
 - [ ] The Worker deployed at least once.
 - [ ] `npx edgekits-i18n migrate` pushes to production KV and purges only the changed namespaces
-      (its log lists them).
+      (its log lists them), twice, 65 s apart. Exit 1 after "KV is updated; the edge cache is
+      not" means the purge did not happen: fix the zone ID or token and run it again.
 - [ ] `.i18n-hashes.json` committed right after every successful `migrate`; `migrate` refuses
       to run while it has uncommitted changes.
 
