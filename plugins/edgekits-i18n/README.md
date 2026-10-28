@@ -102,10 +102,10 @@ npx skills add EdgeKits/i18n --skill astro-i18n
 
 ### Prerequisites
 
-- An Astro `^7.3` project with `output: 'server'` and the `@astrojs/cloudflare` adapter `^14.3`.
+- An Astro `^7.4` project with `output: 'server'` and the `@astrojs/cloudflare` adapter `^14.4`.
   For a new site: `npm create astro@latest`, then `npx astro add cloudflare`, then set
   `output: 'server'` in `astro.config`.
-- wrangler `^4.125` installed in the project (`npm i -D wrangler`) and a `wrangler.jsonc`. The
+- wrangler `^4.152` installed in the project (`npm i -D wrangler`) and a `wrangler.jsonc`. The
   package's CLI runs the project's own wrangler, never a global one.
 - A git repository (`git init`): the generated files and the purge baseline
   (`.i18n-hashes.json`) are committed, and `migrate` checks the baseline against git (outside

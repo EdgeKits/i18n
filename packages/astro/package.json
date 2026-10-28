@@ -60,11 +60,13 @@
     "@edgekits/i18n-core": "0.2.2"
   },
   "peerDependencies": {
-    "@astrojs/cloudflare": "^14.3.0",
-    "astro": "^7.3.0",
-    "wrangler": "^4.125.0"
+    "@astrojs/cloudflare": "^14.4.0",
+    "astro": "^7.4.0",
+    "wrangler": "^4.152.0"
   },
   "devDependencies": {
-    "astro": "^7.3.8"
+    "@astrojs/cloudflare": "^14.4.2",
+    "astro": "^7.4.2",
+    "wrangler": "^4.152.0"
   }
 }
